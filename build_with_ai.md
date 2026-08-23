@@ -2216,12 +2216,13 @@ Configuration and shell files are not changed until the final confirmation.
   Provider timeout       20 seconds (default)
 
 4/6  Shell controls
-  Zsh Smart Enter        On (default)
-  Clear command line     Esc (default)
-  Force translation      Ctrl-G (default)
-  Run unchanged          Ctrl-X then Enter (default)
-  ! Ctrl-G may conflict with terminal assistants.
-  i Ctrl-X waits silently for the rest of its shortcut.
+  Zsh Enter              Detects commands and requests (default)
+  Clear input            Esc (default)
+  Translate request      Ctrl-G (default)
+  Run as typed           Ctrl-X then Enter (default)
+    Also confirms a translated command marked high risk.
+  ! Esc and Ctrl-G may already be used by your shell or terminal. Choose different shortcuts below if needed.
+  i To change a shortcut, press the keys, then Enter. If it includes Enter, type its name instead (for example, Ctrl-X Enter).
 
 5/6  Review
   ...
@@ -2251,8 +2252,8 @@ Do not print detailed diagnostics for unselected providers. The provider questio
 
 Setup must also:
 
-- Report each managed binding it replaces and offer a configurable alternative during setup, especially Escape replacing `vi-cmd-mode` in `viins` and the default `Ctrl-G` collision with stock `send-break`/`list-expand` and app-level terminal shortcuts.
-- Explain that a multi-key prefix waits silently, accept friendly shortcut input such as `Ctrl-X Ctrl-T` or direct physical control-key input, and reject equal or prefix-overlapping shortcuts that would make one action unreachable. Shortcut prompts must capture control keys in raw terminal mode so line-editor actions such as `Ctrl-R` are not mistaken for an empty response; Enter ends the capture, so sequences that themselves end in Enter must be entered by their friendly name.
+- Warn in plain language when a shortcut may replace an existing shell or terminal action, and offer a configurable alternative during setup. Keep implementation-specific keymap and terminal timing details in troubleshooting documentation instead of the setup wizard.
+- Accept friendly shortcut input such as `Ctrl-X Ctrl-T` or direct physical control-key input, and reject equal or prefix-overlapping shortcuts that would make one action unreachable. Shortcut prompts must capture control keys in raw terminal mode so line-editor actions such as `Ctrl-R` are not mistaken for an empty response; Enter ends the capture, so sequences that themselves end in Enter must be entered by their friendly name.
 - Show a final effective-configuration review and require confirmation before writing configuration or shell files. Cancellation must leave those files unchanged and return a cancellation status so the installer can roll back a newly replaced binary.
 - When configuring Codex with `--ignore-user-config`, offer to copy the user's selected Codex model into `providers.codex.model`; otherwise explain that Codex's built-in default is used.
 - When the user chooses OpenRouter in interactive setup, configure it inside that setup flow rather than sending the user to another command: link to the key/model pages, collect the key without echo, validate the key once and validate each candidate's explicit `structured_outputs` capability without model credits, reject incompatible models with a filtered-model link, and immediately repeat the model-ID prompt so the user can paste another ID directly. Never put a yes/no prompt between failed and replacement model IDs; accept `back` to return to provider selection. Disclose and automatically run one minimal metered strict-schema check, stage the credential and concrete successful model until final confirmation, and leave the provider unconfigured if no candidate passes or setup is cancelled. Do not ask for separate approval for a check that is required to finish setup.

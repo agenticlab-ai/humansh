@@ -715,48 +715,39 @@ func configureSetupShell(cfg *config.RuntimeConfig, shells []shell.ID, ui *setup
 	defaults := config.Default()
 	hasZsh, hasBash := containsShell(shells, shell.Zsh), containsShell(shells, shell.Bash)
 	if hasZsh {
-		ui.setting("Zsh Smart Enter", setupOnOff(cfg.Shell.SmartEnter), setupOnOff(defaults.Shell.SmartEnter), "Enter classifies the line; clear commands still run normally.")
+		ui.setting("Zsh Enter", setupEnterBehavior(cfg.Shell.SmartEnter), setupEnterBehavior(defaults.Shell.SmartEnter), "")
 	}
 	if hasBash {
 		if !hasZsh {
 			cfg.Shell.SmartEnter = false
 		}
-		ui.setting("Bash input mode", "Explicit translation", "", "Bash keeps ordinary Enter unchanged; press the force-translate shortcut for English requests.")
+		ui.setting("Bash Enter", "Runs as typed", "", "Use the translate shortcut for English requests.")
 	}
-	ui.setting("Clear command line", config.BindingLabel(cfg.Shell.ClearLineBinding), config.BindingLabel(defaults.Shell.ClearLineBinding), "Clears only live, unsubmitted text and any humansh message; does nothing at an empty prompt.")
-	ui.setting("Force translation", config.BindingLabel(cfg.Shell.ForceTranslateBinding), config.BindingLabel(defaults.Shell.ForceTranslateBinding), "Translates the current text for review without executing it.")
-	ui.setting("Run unchanged", config.BindingLabel(cfg.Shell.ForceLiteralBinding), config.BindingLabel(defaults.Shell.ForceLiteralBinding), "Runs the exact text and is also the high-risk confirmation shortcut.")
-	if cfg.Shell.ForceTranslateBinding == "^G" {
-		if hasBash && !hasZsh {
-			ui.warning("Ctrl-G replaces Readline's stock abort binding; terminal assistants may also intercept it.")
-		} else if hasBash {
-			ui.warning("Ctrl-G replaces stock Zsh and Readline bindings; terminal assistants may also intercept it.")
-		} else {
-			ui.warning("Ctrl-G replaces stock send-break in emacs mode and list-expand in vi keymaps; terminal assistants such as Gemini may also intercept it.")
-		}
-	}
+	ui.setting("Clear input", config.BindingLabel(cfg.Shell.ClearLineBinding), config.BindingLabel(defaults.Shell.ClearLineBinding), "")
+	ui.setting("Translate request", config.BindingLabel(cfg.Shell.ForceTranslateBinding), config.BindingLabel(defaults.Shell.ForceTranslateBinding), "")
+	ui.setting("Run as typed", config.BindingLabel(cfg.Shell.ForceLiteralBinding), config.BindingLabel(defaults.Shell.ForceLiteralBinding), "Also confirms a translated command marked high risk.")
+
+	var shortcutsInUse []string
 	for _, binding := range []string{cfg.Shell.ClearLineBinding, cfg.Shell.ForceTranslateBinding, cfg.Shell.ForceLiteralBinding} {
-		if warning := setupShortcutCollision(binding); warning != "" {
-			ui.warning(warning)
+		if setupShortcutCollision(binding) != "" {
+			shortcutsInUse = append(shortcutsInUse, config.BindingLabel(binding))
 		}
 	}
-	if len(setupBindingKeys(cfg.Shell.ForceLiteralBinding)) > 1 {
-		first := strings.Split(config.BindingLabel(cfg.Shell.ForceLiteralBinding), " then ")[0]
-		ui.note(first + " is a prefix and waits silently for the rest of the run-unchanged shortcut.")
+	if len(shortcutsInUse) > 0 {
+		ui.warning(setupShortcutList(shortcutsInUse) + " may already be used by your shell or terminal. Choose different shortcuts below if needed.")
 	}
 	if !ui.interactive {
 		return nil
 	}
 
 	if hasZsh {
-		smart, err := ui.askYesNo("Enable Smart Enter?", cfg.Shell.SmartEnter)
+		smart, err := ui.askYesNo("Detect commands and requests when you press Enter?", cfg.Shell.SmartEnter)
 		if err != nil {
 			return err
 		}
 		cfg.Shell.SmartEnter = smart
 	}
-	ui.note("Type a shortcut name or press the control keys themselves, then press Enter to save.")
-	ui.note("If the shortcut ends in Enter, type its name—for example Ctrl-X Enter—so Enter can still save the field.")
+	ui.note("To change a shortcut, press the keys, then Enter. If it includes Enter, type its name instead (for example, Ctrl-X Enter).")
 	if err := promptSetupBinding(ui, cfg, "clear"); err != nil {
 		return err
 	}
@@ -769,14 +760,31 @@ func configureSetupShell(cfg *config.RuntimeConfig, shells []shell.ID, ui *setup
 	return nil
 }
 
+func setupEnterBehavior(smart bool) string {
+	if smart {
+		return "Detects commands and requests"
+	}
+	return "Runs as typed"
+}
+
+func setupShortcutList(shortcuts []string) string {
+	if len(shortcuts) == 1 {
+		return shortcuts[0]
+	}
+	if len(shortcuts) == 2 {
+		return shortcuts[0] + " and " + shortcuts[1]
+	}
+	return strings.Join(shortcuts[:len(shortcuts)-1], ", ") + ", and " + shortcuts[len(shortcuts)-1]
+}
+
 func promptSetupBinding(ui *setupUI, cfg *config.RuntimeConfig, bindingType string) error {
-	label, current := "Clear-line shortcut", cfg.Shell.ClearLineBinding
+	label, current := "Clear input shortcut", cfg.Shell.ClearLineBinding
 	switch bindingType {
 	case "translate":
-		label = "Force-translate shortcut"
+		label = "Translate request shortcut"
 		current = cfg.Shell.ForceTranslateBinding
 	case "literal":
-		label = "Run-unchanged shortcut"
+		label = "Run as typed shortcut"
 		current = cfg.Shell.ForceLiteralBinding
 	}
 	for {
@@ -862,21 +870,23 @@ func setupControlKeyLabel(key byte) string {
 func setupShortcutCollision(binding string) string {
 	switch binding {
 	case "^[":
-		return "Escape normally enters command mode from vi insert mode; the clear-line default replaces that behavior. Longer terminal and Alt escape sequences remain available after the shell's key-sequence timeout."
+		return "Esc will clear your input instead of performing its usual shell action."
+	case "^G":
+		return "Ctrl-G will replace its usual shell action and may already be used by your terminal."
 	case "^R":
-		return "Ctrl-R replaces reverse history search in the supported keymaps."
+		return "Ctrl-R will no longer search your command history."
 	case "^C":
-		return "Ctrl-C normally cancels the current command; choose it only if you intend to replace that behavior."
+		return "Ctrl-C will no longer cancel the current command."
 	case "^Z":
-		return "Ctrl-Z normally suspends the foreground process; choose it only if you intend to replace that behavior."
+		return "Ctrl-Z will no longer pause the current command."
 	case "^L":
-		return "Ctrl-L normally clears the terminal screen."
+		return "Ctrl-L will no longer clear the terminal screen."
 	case "^U":
-		return "Ctrl-U normally erases from the cursor to the start of the line."
+		return "Ctrl-U will no longer clear from the cursor to the start of the line."
 	case "^W":
-		return "Ctrl-W normally erases the previous word."
+		return "Ctrl-W will no longer clear the previous word."
 	case "^X":
-		return "Plain Ctrl-X runs immediately and replaces the shell's Ctrl-X prefix shortcut family."
+		return "Ctrl-X will run immediately instead of starting another shortcut."
 	default:
 		return ""
 	}
@@ -929,14 +939,14 @@ func printSetupReview(cfg config.RuntimeConfig, shells []shell.ID, providerReady
 	ui.setting("Timeout", fmt.Sprintf("%d seconds", int(cfg.Timeout.Seconds())), fmt.Sprintf("%d seconds", int(config.Default().Timeout.Seconds())), "")
 	ui.setting("Shell integrations", shellNames(shells), "Auto-detected", "")
 	if containsShell(shells, shell.Zsh) {
-		ui.setting("Zsh Smart Enter", setupOnOff(cfg.Shell.SmartEnter), setupOnOff(config.Default().Shell.SmartEnter), "")
+		ui.setting("Zsh Enter", setupEnterBehavior(cfg.Shell.SmartEnter), setupEnterBehavior(config.Default().Shell.SmartEnter), "")
 	}
 	if containsShell(shells, shell.Bash) {
-		ui.setting("Bash input mode", "Explicit translation", "", "")
+		ui.setting("Bash Enter", "Runs as typed", "", "")
 	}
-	ui.setting("Clear command line", config.BindingLabel(cfg.Shell.ClearLineBinding), config.BindingLabel(config.Default().Shell.ClearLineBinding), "")
-	ui.setting("Force translation", config.BindingLabel(cfg.Shell.ForceTranslateBinding), config.BindingLabel(config.Default().Shell.ForceTranslateBinding), "")
-	ui.setting("Run unchanged", config.BindingLabel(cfg.Shell.ForceLiteralBinding), config.BindingLabel(config.Default().Shell.ForceLiteralBinding), "")
+	ui.setting("Clear input", config.BindingLabel(cfg.Shell.ClearLineBinding), config.BindingLabel(config.Default().Shell.ClearLineBinding), "")
+	ui.setting("Translate request", config.BindingLabel(cfg.Shell.ForceTranslateBinding), config.BindingLabel(config.Default().Shell.ForceTranslateBinding), "")
+	ui.setting("Run as typed", config.BindingLabel(cfg.Shell.ForceLiteralBinding), config.BindingLabel(config.Default().Shell.ForceLiteralBinding), "")
 	ui.setting("Shell activation", startup, "", "These files load Humansh's interactive command-line controls when each shell starts.")
 }
 
@@ -973,13 +983,6 @@ func setupProviderName(id llm.ProviderID) string {
 	default:
 		return string(id)
 	}
-}
-
-func setupOnOff(value bool) string {
-	if value {
-		return "On"
-	}
-	return "Off"
 }
 
 func setupModel(cfg *config.RuntimeConfig) string {
