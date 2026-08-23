@@ -29,10 +29,10 @@ Bash integration requires Bash 4.3 or newer so Humansh can safely capture and re
 Release installation is designed for:
 
 ```sh
-curl -fsSL <project-install-url> | sh
+curl -fsSL https://raw.githubusercontent.com/mdarabi/humansh/main/scripts/install.sh | bash
 ```
 
-Until the final repository URL is configured, set `HUMANSH_REPOSITORY=owner/repository` when running `scripts/install.sh`. The installer downloads a platform archive and verifies its SHA-256 checksum. See [Security](docs/security.md) for the distinction between checksum integrity and release authenticity.
+This downloads the installer directly from the GitHub repository, then installs the matching binary from the latest GitHub release after verifying its SHA-256 checksum. Forks can select their own release repository with `curl -fsSL https://raw.githubusercontent.com/OWNER/REPOSITORY/main/scripts/install.sh | HUMANSH_REPOSITORY=OWNER/REPOSITORY bash`. See [Security](docs/security.md) for the distinction between checksum integrity and release authenticity.
 
 Setup verifies Zsh and Bash independently, installs the embedded integration for each usable shell under the XDG data directory, and adds an idempotent block to each applicable startup file:
 

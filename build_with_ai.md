@@ -2109,10 +2109,10 @@ Requirements:
 The eventual user experience should be one command followed by a short guided setup:
 
 ```sh
-curl -fsSL <project-install-url> | sh
+curl -fsSL https://raw.githubusercontent.com/mdarabi/humansh/main/scripts/install.sh | bash
 ```
 
-Because the final repository owner/URL may not yet be known, implement the installer so the release repository can be supplied through a build-time/default variable. Do not leave local installation broken while waiting for that URL.
+The installer defaults release downloads to `mdarabi/humansh`. Preserve `HUMANSH_REPOSITORY=owner/repository` as an explicit override for forks and release mirrors.
 
 ### 16.1 Checked-out repository flow
 

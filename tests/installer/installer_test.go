@@ -1,7 +1,11 @@
 package installer_test
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +13,112 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestReleaseInstallerDefaultsToPublishedGitHubRepository(t *testing.T) {
+	if (runtime.GOOS != "darwin" && runtime.GOOS != "linux") || (runtime.GOARCH != "arm64" && runtime.GOARCH != "amd64") {
+		t.Skip("release installer supports darwin/linux on arm64/amd64")
+	}
+	repo := repositoryRoot(t)
+	home := t.TempDir()
+	fixtures := t.TempDir()
+	asset := fmt.Sprintf("humansh-%s-%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	archivePath, checksumPath := writeReleaseFixture(t, fixtures, asset)
+	curlLog := filepath.Join(fixtures, "curl.log")
+	fakeBin := filepath.Join(fixtures, "bin")
+	if err := os.Mkdir(fakeBin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fakeCurl := `#!/bin/sh
+set -eu
+url=
+output=
+while [ "$#" -gt 0 ]; do
+  case $1 in
+    -o) output=$2; shift 2 ;;
+    https://*) url=$1; shift ;;
+    *) shift ;;
+  esac
+done
+[ -n "$url" ] && [ -n "$output" ] || exit 2
+printf '%s\n' "$url" >> "$HUMANSH_FAKE_CURL_LOG"
+case $url in
+  *.tar.gz.sha256) cp "$HUMANSH_FAKE_CHECKSUM" "$output" ;;
+  *.tar.gz) cp "$HUMANSH_FAKE_ARCHIVE" "$output" ;;
+  *) exit 22 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(fakeBin, "curl"), []byte(fakeCurl), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	env := isolatedEnvironment(home)
+	env = removeEnvironmentKey(env, "HUMANSH_REPOSITORY")
+	env = replaceEnvironmentValue(env, "PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	env = append(env, "HUMANSH_FAKE_ARCHIVE="+archivePath, "HUMANSH_FAKE_CHECKSUM="+checksumPath, "HUMANSH_FAKE_CURL_LOG="+curlLog)
+	command := exec.Command("bash", filepath.Join(repo, "scripts", "install.sh"))
+	command.Dir = repo
+	command.Env = env
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("release install: %v\n%s", err, output)
+	}
+
+	installed := filepath.Join(home, ".local", "bin", "humansh")
+	data, err := os.ReadFile(installed)
+	if err != nil || !strings.Contains(string(data), "release-fixture") {
+		t.Fatalf("release binary was not installed: err=%v data=%q", err, data)
+	}
+	requests, err := os.ReadFile(curlLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := "https://github.com/mdarabi/humansh/releases/latest/download/"
+	for _, want := range []string{base + asset, base + asset + ".sha256"} {
+		if !strings.Contains(string(requests), want) {
+			t.Errorf("release installer did not request %q:\n%s", want, requests)
+		}
+	}
+	if !strings.Contains(string(output), "Installed humansh to "+installed) {
+		t.Fatalf("release install did not report completion:\n%s", output)
+	}
+}
+
+func writeReleaseFixture(t *testing.T, directory, asset string) (string, string) {
+	t.Helper()
+	archivePath := filepath.Join(directory, asset)
+	archiveFile, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gzipWriter := gzip.NewWriter(archiveFile)
+	tarWriter := tar.NewWriter(gzipWriter)
+	payload := []byte("#!/bin/sh\necho release-fixture\n")
+	if err := tarWriter.WriteHeader(&tar.Header{Name: "humansh", Mode: 0o755, Size: int64(len(payload)), Typeflag: tar.TypeReg}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tarWriter.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := archiveFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(data)
+	checksumPath := archivePath + ".sha256"
+	if err := os.WriteFile(checksumPath, []byte(fmt.Sprintf("%x  %s\n", digest, asset)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return archivePath, checksumPath
+}
 
 func TestLocalInstallSetupAndUninstall(t *testing.T) {
 	repo := repositoryRoot(t)

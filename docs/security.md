@@ -16,7 +16,7 @@ OpenRouter keys are stored in macOS Keychain when available or a mode-0600 file 
 
 `curl ... | sh` is intentionally classified high risk, including humansh's convenience installer and provider vendor installers. For stronger review, download the script, inspect it, then run it separately.
 
-A SHA-256 checksum fetched from the same release host provides integrity against accidental corruption, not authenticity against a compromised host. The current release script does not yet sign checksums or emit a provenance attestation; release documentation must not claim otherwise.
+A SHA-256 checksum fetched from the same release host provides integrity against accidental corruption, not authenticity against a compromised host. The current release script does not yet sign checksums or emit a provenance attestation; release documentation must not claim otherwise. The one-line installer also executes the current `main`-branch script from `raw.githubusercontent.com`; users who require an immutable installer review point should download, inspect, and invoke a commit-pinned copy instead.
 
 Humansh does not create cloud accounts, purchase credits or subscriptions, silently switch providers, or collect telemetry. Provider account creation and billing remain explicit actions between the user and the provider.
 

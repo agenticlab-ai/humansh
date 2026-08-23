@@ -61,11 +61,7 @@ if [ "$mode" = local ]; then
   (cd "$repo_dir" && go build -trimpath -o "$temp_dir/humansh" ./cmd/humansh)
   source_binary="$temp_dir/humansh"
 else
-  repository=${HUMANSH_REPOSITORY:-}
-  if [ -z "$repository" ]; then
-    echo "humansh installer: HUMANSH_REPOSITORY must name the release repository (owner/name)." >&2
-    exit 1
-  fi
+  repository=${HUMANSH_REPOSITORY:-mdarabi/humansh}
   repository_owner=${repository%/*}
   repository_name=${repository#*/}
   if [ "$repository" != "$repository_owner/$repository_name" ] || [ -z "$repository_owner" ] || [ -z "$repository_name" ]; then
