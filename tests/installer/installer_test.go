@@ -438,6 +438,29 @@ func TestStandaloneUninstallUsesBashInstallState(t *testing.T) {
 	repo := repositoryRoot(t)
 	home := t.TempDir()
 	env := isolatedEnvironment(home)
+	fakeBin := filepath.Join(home, "fake-bin")
+	if err := os.Mkdir(fakeBin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// GNU stat uses -f for filesystem information and can emit output before
+	// rejecting the BSD format operand. Ensure that failed output cannot leak
+	// into the fallback mode value used by the portable uninstaller.
+	fakeStat := `#!/bin/sh
+case ${1-} in
+  -f) echo leaked-filesystem-output; exit 1 ;;
+  -c)
+    case ${3-} in
+      *install-state.toml) echo 600 ;;
+      *) echo 640 ;;
+    esac
+    exit 0 ;;
+esac
+exit 2
+`
+	if err := os.WriteFile(filepath.Join(fakeBin, "stat"), []byte(fakeStat), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env = replaceEnvironmentValue(env, "PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	binary := filepath.Join(home, ".local", "bin", "humansh")
 	dataDir := filepath.Join(home, "data", "humansh")
 	asset := filepath.Join(dataDir, "shell", "bash", "humansh.bash")

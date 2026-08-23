@@ -179,7 +179,7 @@ wait_for() {
 }
 for provider_label in Codex 'Claude Code' 'Cursor CLI' OpenRouter; do
   export HUMANSH_PROVIDER_LABEL=$provider_label
-  zpty -b H env PATH="$HUMANSH_FAKE_DIR:$PATH" HUMANSH_ASSET="$HUMANSH_ASSET" HUMANSH_SMART_ENTER=0 "$HUMANSH_BASH" --noprofile --norc -i
+  zpty -b H env PATH="$HUMANSH_FAKE_DIR:$PATH" TERM=xterm-256color HUMANSH_ASSET="$HUMANSH_ASSET" HUMANSH_SMART_ENTER=0 "$HUMANSH_BASH" --noprofile --norc -i
   zpty -w H 'PS1="C> "; set +o history; _cancel_dump() { printf "\nCANCEL_DUMP:<%s>\n" "$READLINE_LINE"; }; bind -x '"'"'"\C-]":_cancel_dump'"'"'; source "$HUMANSH_ASSET"; printf "CANCEL_READY\n"'
   wait_for '*CANCEL_READY*C> *' || exit 91
   zpty -w -n H $'slow please\x07'

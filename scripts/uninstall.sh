@@ -49,12 +49,26 @@ state_integer() {
   ' "$state_file"
 }
 
+file_mode() {
+  if mode_output=$(stat -f '%Lp' "$1" 2>/dev/null); then
+    :
+  elif mode_output=$(stat -c '%a' "$1" 2>/dev/null); then
+    :
+  else
+    return 1
+  fi
+  case $mode_output in
+    ''|*[!0-7]*) return 1 ;;
+  esac
+  printf '%s\n' "$mode_output"
+}
+
 if [ -L "$state_file" ]; then
   echo "humansh uninstall: install state must be a regular file, not a symlink; no files were changed." >&2
   exit 1
 fi
 if [ -f "$state_file" ]; then
-  state_mode=$(stat -f '%Lp' "$state_file" 2>/dev/null || stat -c '%a' "$state_file")
+  state_mode=$(file_mode "$state_file") || { echo "humansh uninstall: could not determine install state permissions; no files were changed." >&2; exit 1; }
   [ "$state_mode" = 600 ] || { echo "humansh uninstall: install state has unsafe mode $state_mode; run 'chmod 600 $state_file' and retry." >&2; exit 1; }
   state_version=$(state_integer version) || { echo "humansh uninstall: install state is invalid; run 'humansh doctor --fix' and retry." >&2; exit 1; }
   block_version=$(state_integer managed_block_version) || { echo "humansh uninstall: install state is invalid; run 'humansh doctor --fix' and retry." >&2; exit 1; }
@@ -174,7 +188,7 @@ remove_startup_block() {
   candidate=$1
   candidate_write=$2
   [ ! -f "$candidate" ] && return 0
-  startup_mode=$(stat -f '%Lp' "$candidate" 2>/dev/null || stat -c '%a' "$candidate")
+  startup_mode=$(file_mode "$candidate") || { echo "humansh uninstall: could not determine permissions for $candidate; no startup-file changes were made." >&2; return 1; }
   startup_dir=$(dirname "$candidate_write")
   temp_file=$(mktemp "$startup_dir/.humansh-startup.XXXXXX") || { echo "humansh uninstall: cannot create a temporary file beside $candidate_write; no files were changed." >&2; return 1; }
   trap 'rm -f "$temp_file"' EXIT HUP INT TERM
