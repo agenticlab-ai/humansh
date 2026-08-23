@@ -253,7 +253,7 @@ wait_for() {
   return 1
 }
 
-zpty -w H 'PS1="E> "; source "$HUMANSH_ASSET"; _test_snapshot() { zle -I; print -r -- "SNAP:<$BUFFER>:MSG:$_HUMANSH_MESSAGE_ACTIVE"; zle reset-prompt; }; _test_message() { _humansh_message "HUMANSH_DESCRIPTION"; }; zle -N _test_snapshot; zle -N _test_message; for keymap in main emacs viins vicmd; do bindkey -M "$keymap" "^]" _test_snapshot; bindkey -M "$keymap" "^\\" _test_message; done; print -r -- READY'
+zpty -w H 'PS1="E> "; source "$HUMANSH_ASSET"; _test_snapshot() { zle -I; print -r -- "SNAP:<$BUFFER>:MSG:$_HUMANSH_MESSAGE_ACTIVE"; zle reset-prompt; }; _test_message() { _humansh_message "HUMANSH_DESCRIPTION"; }; zle -N _test_snapshot; zle -N _test_message; for keymap in main emacs viins vicmd; do bindkey -M "$keymap" "^]" _test_snapshot; bindkey -M "$keymap" "^Y" _test_message; done; print -r -- READY'
 wait_for '*READY*E> *' || exit 91
 zpty -w -n H $'draft text\e'
 sleep 0.2
@@ -269,7 +269,7 @@ zpty -w -n H $'\e'
 sleep 0.1
 zpty -w -n H $'\x1d'
 wait_for '*SNAP:<>:MSG:0*' || exit 94
-zpty -w -n H $'\x1c'
+zpty -w -n H $'\x19'
 wait_for '*HUMANSH_DESCRIPTION*' || exit 95
 zpty -w -n H $'\e'
 sleep 0.2
