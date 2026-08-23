@@ -74,7 +74,10 @@ if [ -f "$state_file" ]; then
   block_version=$(state_integer managed_block_version) || { echo "humansh uninstall: install state is invalid; run 'humansh doctor --fix' and retry." >&2; exit 1; }
   state_binary=$(state_string binary_path) || { echo "humansh uninstall: install state binary_path is invalid; run 'humansh doctor --fix' and retry." >&2; exit 1; }
   state_installed_version=$(state_string installed_version) || { echo "humansh uninstall: install state installed_version is invalid; run 'humansh doctor --fix' and retry." >&2; exit 1; }
-  [ -n "$state_installed_version" ] && [ "$block_version" = 1 ] || { echo "humansh uninstall: install state version is unsupported." >&2; exit 1; }
+  if [ -z "$state_installed_version" ] || [ "$block_version" != 1 ]; then
+    echo "humansh uninstall: install state version is unsupported." >&2
+    exit 1
+  fi
   [ "$state_binary" = "$binary" ] || { echo "humansh uninstall: install-state paths do not match the current humansh layout; no files were changed." >&2; exit 1; }
   binary=$state_binary
   case $state_version in
@@ -90,11 +93,17 @@ if [ -f "$state_file" ]; then
         zsh:zle-v1)
           use_zsh=1
           use_bash=0
-          [ "$state_asset" = "$zsh_asset" ] && [ "$state_startup" = "$zsh_startup" ] || { echo "humansh uninstall: install-state paths do not match the current humansh layout; no files were changed." >&2; exit 1; } ;;
+          if [ "$state_asset" != "$zsh_asset" ] || [ "$state_startup" != "$zsh_startup" ]; then
+            echo "humansh uninstall: install-state paths do not match the current humansh layout; no files were changed." >&2
+            exit 1
+          fi ;;
         bash:readline-v1)
           use_zsh=0
           use_bash=1
-          [ "$state_asset" = "$bash_asset" ] && [ "$state_startup" = "$bash_startup" ] || { echo "humansh uninstall: install-state paths do not match the current humansh layout; no files were changed." >&2; exit 1; } ;;
+          if [ "$state_asset" != "$bash_asset" ] || [ "$state_startup" != "$bash_startup" ]; then
+            echo "humansh uninstall: install-state paths do not match the current humansh layout; no files were changed." >&2
+            exit 1
+          fi ;;
         *) echo "humansh uninstall: install state shell or protocol is unsupported." >&2; exit 1 ;;
       esac
       ;;
@@ -112,7 +121,10 @@ if [ -f "$state_file" ]; then
         zsh_digest=$(state_string zsh_shell_asset_sha256) || { echo "humansh uninstall: zsh install state is invalid." >&2; exit 1; }
         zsh_state_startup=$(state_string zsh_startup_file) || { echo "humansh uninstall: zsh install state is invalid." >&2; exit 1; }
         case $zsh_digest in *[!0-9A-Fa-f]*|'') echo "humansh uninstall: zsh install-state digest is invalid." >&2; exit 1 ;; esac
-        [ "$zsh_protocol" = zle-v1 ] && [ "${#zsh_digest}" -eq 64 ] && [ "$zsh_state_asset" = "$zsh_asset" ] && [ "$zsh_state_startup" = "$zsh_startup" ] || { echo "humansh uninstall: zsh install state does not match the current humansh layout." >&2; exit 1; }
+        if [ "$zsh_protocol" != zle-v1 ] || [ "${#zsh_digest}" -ne 64 ] || [ "$zsh_state_asset" != "$zsh_asset" ] || [ "$zsh_state_startup" != "$zsh_startup" ]; then
+          echo "humansh uninstall: zsh install state does not match the current humansh layout." >&2
+          exit 1
+        fi
       fi
       if [ "$use_bash" -eq 1 ]; then
         bash_protocol=$(state_string bash_protocol) || { echo "humansh uninstall: bash install state is invalid." >&2; exit 1; }
@@ -120,7 +132,10 @@ if [ -f "$state_file" ]; then
         bash_digest=$(state_string bash_shell_asset_sha256) || { echo "humansh uninstall: bash install state is invalid." >&2; exit 1; }
         bash_state_startup=$(state_string bash_startup_file) || { echo "humansh uninstall: bash install state is invalid." >&2; exit 1; }
         case $bash_digest in *[!0-9A-Fa-f]*|'') echo "humansh uninstall: bash install-state digest is invalid." >&2; exit 1 ;; esac
-        [ "$bash_protocol" = readline-v1 ] && [ "${#bash_digest}" -eq 64 ] && [ "$bash_state_asset" = "$bash_asset" ] && [ "$bash_state_startup" = "$bash_startup" ] || { echo "humansh uninstall: bash install state does not match the current humansh layout." >&2; exit 1; }
+        if [ "$bash_protocol" != readline-v1 ] || [ "${#bash_digest}" -ne 64 ] || [ "$bash_state_asset" != "$bash_asset" ] || [ "$bash_state_startup" != "$bash_startup" ]; then
+          echo "humansh uninstall: bash install state does not match the current humansh layout." >&2
+          exit 1
+        fi
       fi
       ;;
     *) echo "humansh uninstall: install state version is unsupported." >&2; exit 1 ;;

@@ -12,7 +12,10 @@ while [ "$#" -gt 0 ]; do
       mode=local
       shift ;;
     --shell)
-      [ -z "$target_shell" ] && [ "$#" -ge 2 ] || { echo "usage: scripts/install.sh [--local] [--shell bash|zsh]" >&2; exit 2; }
+      if [ -n "$target_shell" ] || [ "$#" -lt 2 ]; then
+        echo "usage: scripts/install.sh [--local] [--shell bash|zsh]" >&2
+        exit 2
+      fi
       target_shell=$2
       case $target_shell in bash|zsh) ;; *) echo "humansh installer: --shell must be bash or zsh." >&2; exit 2 ;; esac
       shift 2 ;;
@@ -93,7 +96,10 @@ else
   members=$(tar -tzf "$temp_dir/$asset")
   [ "$members" = "humansh" ] || { echo "release archive contains unexpected paths" >&2; exit 1; }
   tar -xzf "$temp_dir/$asset" -C "$temp_dir"
-  [ -f "$temp_dir/humansh" ] && [ ! -L "$temp_dir/humansh" ] || { echo "release archive does not contain a regular humansh binary" >&2; exit 1; }
+  if [ ! -f "$temp_dir/humansh" ] || [ -L "$temp_dir/humansh" ]; then
+    echo "release archive does not contain a regular humansh binary" >&2
+    exit 1
+  fi
   source_binary="$temp_dir/humansh"
 fi
 

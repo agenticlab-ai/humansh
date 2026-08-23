@@ -12,7 +12,7 @@ test-architecture:
 
 test-classifier:
 	go test ./internal/classifier ./internal/app
-	go test ./internal/classifier -run 'Test|Fuzz' -fuzz=FuzzClassifier -fuzztime=2s
+	go test ./internal/classifier -run 'Test|Fuzz' -fuzz=FuzzClassifier -fuzztime=50000x
 
 bench-classifier:
 	go test ./internal/classifier ./tests/performance -run '^$$' -bench 'Benchmark(Classifier|LiteralProcessStartup)' -benchmem
