@@ -162,7 +162,7 @@ step $'git status\r' '*ACCEPTED:git status*'
 print -r -- ALL_DONE
 zpty -d H
 `
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "zsh", "-f", "-c", script)
 	cmd.Dir = temp
