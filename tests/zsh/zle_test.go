@@ -151,7 +151,13 @@ zpty -w -n H $'slow please\r'
 wait_for '*Translating with Codex*' || exit 98
 wait_slow_calls 2 || exit 99
 zpty -w -n H $'\x03'
-sleep 0.1
+# Wait for the cancellation to actually complete rather than sleeping a fixed
+# guess. Until the widget finishes unwinding, its spinner loop is still reading
+# keys off /dev/tty, so a dump key sent too early is swallowed as a candidate
+# clear-line keystroke and never reaches the test widget. The message below is
+# emitted after the provider is reaped and the spinner has stopped, which makes
+# it a sound signal that the tty is free again.
+wait_for '*Translation cancelled*' || exit 89
 step $'\x1d' '*DUMP:<slow please>*'
 zpty -w -n H $'\x15'
 touch "$HUMANSH_FAKE_UNAVAILABLE"
