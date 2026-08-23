@@ -192,7 +192,7 @@ _humansh_run_translation_with_spinner() {
 
 	print -rn -- "$BUFFER" | command humansh "$mode" --protocol zle-v1 --shell zsh --first-token-kind "$kind" >"$output_file" 2>"$error_file" &
 	provider_pid=$!
-	while kill -0 -- "$provider_pid" 2>/dev/null; do
+	while (( ! interrupted )) && kill -0 -- "$provider_pid" 2>/dev/null; do
 		_humansh_message "${frames[frame_index]} Translating with ${_HUMANSH_PROVIDER_LABEL}…"
 		zle -R
 		key=''
