@@ -151,7 +151,13 @@ zpty -w -n H $'slow please\r'
 wait_for '*Translating with Codex*' || exit 98
 wait_slow_calls 2 || exit 99
 zpty -w -n H $'\x03'
-sleep 0.1
+# Wait for the cancellation to actually complete rather than sleeping a fixed
+# guess. Until the widget finishes unwinding, its spinner loop is still reading
+# keys off /dev/tty, so a dump key sent too early is swallowed as a candidate
+# clear-line keystroke and never reaches the test widget. The message below is
+# emitted after the provider is reaped and the spinner has stopped, which makes
+# it a sound signal that the tty is free again.
+wait_for '*Translation cancelled*' || exit 89
 step $'\x1d' '*DUMP:<slow please>*'
 zpty -w -n H $'\x15'
 touch "$HUMANSH_FAKE_UNAVAILABLE"
@@ -162,14 +168,36 @@ step $'git status\r' '*ACCEPTED:git status*'
 print -r -- ALL_DONE
 zpty -d H
 `
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	// This budget is a hang backstop, not a performance assertion. The protocol
+	// drives ~160 PTY steps, each spawning the fake backend, and `go test ./...`
+	// runs packages concurrently, so on a contended hosted macOS runner the whole
+	// sequence costs several times what it does on an idle developer machine
+	// (~16s local versus >90s in CI, which is what the previous ceiling kept
+	// tripping over). Two of those steps also wait on the fake's deliberate 2s
+	// slow-provider delay, which exists so the cancellation keys arrive while the
+	// provider is genuinely still running; that cost is fixed and cannot be tuned
+	// away without making the cancel steps racy in the other direction.
+	//
+	// Prefer a generous ceiling over a tight one: a real hang still fails, just
+	// later, whereas a tight ceiling turns runner contention into red builds on
+	// unrelated pull requests.
+	const protocolBudget = 240 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), protocolBudget)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "zsh", "-f", "-c", script)
 	cmd.Dir = temp
 	cmd.Env = append(os.Environ(), "TMPDIR="+temp, "HUMANSH_ASSET="+asset, "HUMANSH_FAKE_DIR="+temp, "HUMANSH_FAKE_CALLS="+calls, "HUMANSH_FAKE_UNAVAILABLE="+filepath.Join(temp, "unavailable"))
+	started := time.Now()
 	output, err := cmd.CombinedOutput()
+	elapsed := time.Since(started)
 	if err != nil {
-		t.Fatalf("zpty protocol: %v\n%s", err, output)
+		// Distinguish "ran out of clock" from a protocol assertion, so a future
+		// failure does not read as an unexplained kill. The script exits with a
+		// distinct status per step, which survives in err for the second case.
+		if ctx.Err() != nil {
+			t.Fatalf("zpty protocol exceeded its %s budget after %s; the last STEP line below is where it stalled:\n%s", protocolBudget, elapsed.Round(time.Second), output)
+		}
+		t.Fatalf("zpty protocol failed after %s: %v\n%s", elapsed.Round(time.Second), err, output)
 	}
 	if !strings.Contains(string(output), "ALL_DONE") {
 		t.Fatalf("protocol did not finish:\n%s", output)
