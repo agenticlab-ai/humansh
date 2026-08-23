@@ -334,9 +334,14 @@ func TestSetupAutoConfiguresEveryAvailableShell(t *testing.T) {
 			t.Errorf("asset %s: %v", check.asset, statErr)
 		}
 	}
-	for _, want := range []string{"Shell compatibility", "Bash 5.2.0", "compatible", "Shell activation lets Humansh read and update the text at your prompt", "Zsh activation", "Bash activation", "Shell integrations", "Zsh and Bash", "load automatically in each configured shell"} {
+	for _, want := range []string{"Shell compatibility", "Bash 5.2.0", "compatible", "Shell integrations", "Zsh and Bash", "load automatically in each configured shell"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("automatic setup output missing %q:\n%s", want, out.String())
+		}
+	}
+	for _, hidden := range []string{"Shell activation lets Humansh read and update the text at your prompt", "Zsh activation", "Bash activation"} {
+		if strings.Contains(out.String(), hidden) {
+			t.Errorf("Shell compatibility exposed hidden activation detail %q:\n%s", hidden, out.String())
 		}
 	}
 }

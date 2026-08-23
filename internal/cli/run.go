@@ -778,8 +778,6 @@ func runSetup(ctx context.Context, args []string, rt bootstrap.Runtime, streams 
 		cfg.Shell.SmartEnter = false
 	}
 	if *noShellChange {
-		ui.note("Shell activation lets Humansh read and update the text at your prompt. No activation files will be edited; setup will print the blocks to add manually.")
-		ui.status(false, "Shell activation", "manual installation requested")
 		previousStartups, previewErr := config.PreviewRemovedStartupChanges(rt.Paths, targetShells, *repair)
 		if previewErr != nil {
 			fmt.Fprintf(streams.Err, "humansh: cannot inspect installed shell integrations: %v\nNothing was changed or executed.\n", previewErr)
@@ -788,11 +786,6 @@ func runSetup(ctx context.Context, args []string, rt bootstrap.Runtime, streams 
 		if len(previousStartups) > 0 {
 			fmt.Fprintln(streams.Err, "humansh: --no-shell-change cannot restrict existing shell integrations because prior startup blocks would remain active.\nNothing was changed or executed.")
 			return protocol.ExitConfig
-		}
-	} else {
-		ui.note("Shell activation lets Humansh read and update the text at your prompt. Each shell loads its small managed block when it starts.")
-		for _, id := range targetShells {
-			ui.status(true, shellDisplayName(id)+" activation", "~/"+shellStartupName(id)+" — add or update the Humansh managed block")
 		}
 	}
 

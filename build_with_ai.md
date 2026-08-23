@@ -2204,8 +2204,6 @@ Configuration and shell files are not changed until the final confirmation.
   i Humansh automatically configures every compatible Zsh or Bash installation it finds.
   ✓ Zsh 5.9          compatible
   – Bash 3.2.57      minimum required: Bash 4.3
-  i Shell activation lets Humansh read and update the text at your prompt. Each shell loads its small managed block when it starts.
-  ✓ Zsh activation   ~/.zshrc — add or update the Humansh managed block
 
 2/6  AI provider
   ✓ Codex            ready — ChatGPT subscription
@@ -2236,7 +2234,7 @@ Configuration and shell files are not changed until the final confirmation.
   Bash: type natural language and press Ctrl-G; Enter runs normal Bash commands.
 ```
 
-Keep prompts concise and visually grouped. The first phase must be called **Shell compatibility**, not a generic environment check. List every installed supported shell with a concise parsed version. A compatible shell says `compatible`; an installed shell below its version floor shows only its minimum requirement rather than a long diagnostic. Do not list an absent shell as though it were an installation failure. Call the startup-file operation **Shell activation** and explain before listing files that the managed block loads Humansh's interactive command-line controls when that shell starts. During shell discovery, provider diagnostics, post-login rechecks, and OpenRouter network checks, render an animated in-place loader when stdout is a usable terminal, then clear it before printing results or prompts. When output is redirected or the terminal is `dumb`, emit one stable `Checking…` line with no carriage returns or ANSI escapes. Use color and emphasis only on an interactive terminal, respect `NO_COLOR`, and never emit ANSI styling for redirected or non-interactive output. Explain whether the provider uses a subscription login or metered API key. Show human-readable shortcuts in prompts and summaries while continuing to store canonical shell-independent binding notation.
+Keep prompts concise and visually grouped. The first phase must be called **Shell compatibility**, not a generic environment check. List every installed supported shell with a concise parsed version. A compatible shell says `compatible`; an installed shell below its version floor shows only its minimum requirement rather than a long diagnostic. Do not list an absent shell as though it were an installation failure. Do not show shell-activation explanations or startup-file targets in this phase; reserve those details and managed-block patches for the final review. During shell discovery, provider diagnostics, post-login rechecks, and OpenRouter network checks, render an animated in-place loader when stdout is a usable terminal, then clear it before printing results or prompts. When output is redirected or the terminal is `dumb`, emit one stable `Checking…` line with no carriage returns or ANSI escapes. Use color and emphasis only on an interactive terminal, respect `NO_COLOR`, and never emit ANSI styling for redirected or non-interactive output. Explain whether the provider uses a subscription login or metered API key. Show human-readable shortcuts in prompts and summaries while continuing to store canonical shell-independent binding notation.
 
 When the selected subscription CLI is installed but logged out, setup should offer to start its official login flow immediately:
 
