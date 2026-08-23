@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install test tools
+        run: |
+          if command -v apt-get >/dev/null; then sudo apt-get update && sudo apt-get install -y zsh shellcheck; fi
+          if command -v brew >/dev/null; then brew install shellcheck || true; fi
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: sh scripts/check-architecture.sh
+      - run: make test-classifier
+      - run: go test ./...
+      - run: go test -race ./...
+      - run: zsh -n assets/shell/zsh/humansh.zsh
+      - run: bash -n assets/shell/bash/humansh.bash
+      - run: shellcheck -s sh scripts/*.sh
+      - run: shellcheck -s bash assets/shell/zsh/humansh.zsh assets/shell/bash/humansh.bash
+
+  release-builds:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: sh scripts/release.sh 0.0.0-ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cross-platform-release-smoke
+          path: dist/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build release archives and checksums
+        run: sh scripts/release.sh "${GITHUB_REF_NAME#v}"
+      - name: Publish tag assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes

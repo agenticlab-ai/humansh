@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": { "type": "string", "enum": ["ok", "clarify", "unsupported"] },
+    "command": { "type": "string", "maxLength": 4096 },
+    "explanation": { "type": "string", "maxLength": 500 },
+    "clarification": { "type": "string", "maxLength": 500 },
+    "assumptions": {
+      "type": "array",
+      "maxItems": 5,
+      "items": { "type": "string", "maxLength": 200 }
+    }
+  },
+  "required": ["status", "command", "explanation", "clarification", "assumptions"]
+}
+

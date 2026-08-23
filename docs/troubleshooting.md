@@ -1,0 +1,118 @@
+# Troubleshooting
+
+## Shell setup
+
+Run:
+
+```sh
+humansh doctor
+humansh doctor --fix
+exec zsh
+```
+
+Run `humansh setup` without naming a shell. It configures every usable supported shell automatically. Bash 4.3+ is required so Humansh can safely capture and restore existing Readline shell-command bindings. The `/bin/bash` shipped by macOS is 3.2, so automatic setup skips it and continues with Zsh. Install a current Bash, ensure it is the `bash` found in `PATH`, and rerun `humansh setup` to add Bash support.
+
+Humansh cannot always modify `.zshrc` or `.bashrc`. Setup runs as the current user without `sudo`, requires owner-writable regular files, and atomically replaces them through writable parent directories. For a symlink, those checks apply to the resolved regular-file target. Interactive setup detects common access failures before confirmation and offers to continue without editing shell files. `humansh setup --no-shell-change` prints the exact block for every detected integration; it cannot be combined with an integration restriction that would leave an old managed block active.
+
+Humansh is installed before `zsh-syntax-highlighting` so that plugin can wrap the widget. If the binary is moved or deleted, the widget fails open to the previous Enter binding and prints a one-time warning.
+
+Run `humansh-bindings` inside Zsh to see the active and captured previous Enter, clear-line, and force widgets in `main`, `emacs`, `viins`, and `vicmd`. If `doctor` reports a later direct `bindkey` reset or Enter binding, move it before the humansh block (while keeping `zsh-syntax-highlighting` after humansh), then run `humansh setup --repair`.
+
+In Bash, `humansh-bindings` reports the `emacs-standard`, `vi-insert`, and `vi-command` Readline maps. Ordinary Enter is deliberately unchanged. Type an English request and press Ctrl-G to translate it; review the replacement and press Enter to run low/medium-risk output. High-risk output requires Ctrl-X then Enter.
+
+Escape clears the complete command line by default. In vi insert mode this replaces Escape's usual transition to command mode. Choose another clear-line shortcut with `humansh config set shell.clear_line_binding '^U'`; the previous Escape widget returns after opening a new shell, or immediately when `humansh-off` is safe to run.
+
+Setup and uninstall preserve a symlinked `.zshrc` or `.bashrc` and atomically update its regular-file target. Setup resolves valid chains; uninstall fails closed with manual guidance for dangling or chained links instead of replacing them.
+
+`doctor --fix` repairs humansh-owned file permissions, the immutable shell asset, and the managed block. A missing binary requires reinstalling:
+
+```sh
+./scripts/install.sh --local
+```
+
+When a valid manually formatted `config.toml` or `classifier.toml` must be rewritten, humansh first preserves its exact bytes in a mode-0600 sibling named `*.humansh-backup-*`.
+
+`humansh uninstall` and the standalone uninstall script validate every machine-managed install-state path against the current XDG/home layout before deleting anything. If that preflight reports corrupt or redirected state, run `humansh doctor --fix` and retry. Use `humansh uninstall --purge` only when configuration and credentials should also be removed; declining cancels the entire operation. A successful child process cannot unload bindings already held by its parent shell; restart that shell only to replace its in-memory state.
+
+## Codex
+
+```sh
+codex login
+codex login status
+humansh provider test codex
+```
+
+Choose “Sign in with ChatGPT.” API-key login is usage-based and is not accepted by the `codex` subscription adapter. If safe structured-output or mandatory tool-disable config is unavailable, update Codex rather than weakening isolation.
+
+For a corroborated ChatGPT auth record with newly unrecognized status wording:
+
+```sh
+humansh provider configure codex
+humansh provider configure codex --confirm-subscription-auth
+```
+
+## Claude Code
+
+Shell aliases can hide multiple installations. Automatic selection uses the first executable named `claude` in `PATH`, then falls back to the native installer's `~/.local/bin/claude` path so a new/self-updated CLI is still found before the shell refreshes PATH. `humansh setup` lists distinct PATH installations and lets you pin the one whose subscription login works. The selected path is verified before the final setup confirmation. You can also change it directly:
+
+```sh
+humansh config set providers.claude.binary /absolute/path/to/claude
+humansh config set providers.claude.binary auto
+```
+
+```sh
+claude auth login --claudeai
+claude auth status --text
+claude update
+humansh provider test claude
+```
+
+Unset `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, custom base URLs, and Bedrock/Vertex/Foundry selectors before using the subscription adapter.
+
+## Cursor CLI
+
+Humansh prefers `cursor-agent`, falls back to `agent`, and does not use the `cursor` editor launcher. Setup can pin a specific installation when multiple distinct CLI executables are present. You can also select it directly:
+
+```sh
+humansh config set providers.cursor.binary /absolute/path/to/cursor-agent
+humansh config set providers.cursor.binary auto
+```
+
+Repair and test the browser login with:
+
+```sh
+cursor-agent login
+cursor-agent status
+cursor-agent update
+humansh provider test cursor
+```
+
+Unset `CURSOR_API_KEY`, `CURSOR_AUTH_TOKEN`, and `CURSOR_API_ENDPOINT` before using the Cursor subscription adapter. If doctor says the installed CLI lacks read-only Ask mode, sandboxing, trust, or JSON output, update Cursor CLI rather than weakening those controls.
+
+## OpenRouter
+
+```sh
+humansh provider configure openrouter --model provider/model
+humansh provider test openrouter
+```
+
+HTTP 401 means the key is missing/invalid; 402 means insufficient credits or key spending limit; 403 is a permission/policy denial; 404 is an invalid model; 429 is rate limiting. OpenRouter is never used as silent paid fallback.
+
+Do not set only `providers.openrouter.model` and expect it to become usable. The configure command performs read-only key and model-capability checks before automatically running the disclosed minimal metered schema check, then records the successful concrete model. A model can exist on OpenRouter and support basic `response_format` while lacking the `structured_outputs` capability humansh requires; choose one from `https://openrouter.ai/models?order=newest&supported_parameters=structured_outputs`. If a setup candidate is rejected, paste the next model ID directly at the repeated model prompt; type `back` to choose another provider.
+
+## Classification
+
+Inspect a surprising result without contacting a provider:
+
+```sh
+print -rn -- 'INPUT' | humansh classify --first-token-kind unknown
+humansh classifier list
+```
+
+Use `Ctrl-G` to force translation, or press `Ctrl-X` then `Enter` to run the exact text unchanged. If you customize either binding, humansh shows the configured key sequence in its next-step messages. Conflicting overrides are reported by `humansh doctor`.
+
+## Provider output
+
+Exit 25 means the provider returned an incomplete/malformed final response; retry or run `humansh provider test`. Exit 26 means local policy rejected content such as controls, Markdown, surrounding prose, or obfuscated execution. In both cases the original buffer and cursor remain unchanged and nothing executes.
+
+Syntax failures are exit 25. Terminal controls, presentation prompts, Markdown, alternatives/prose, and rejected obfuscation are exit 26. High-risk but reviewable commands return exit 14 and remain gated in ZLE or Readline.
