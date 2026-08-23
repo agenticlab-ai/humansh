@@ -1,0 +1,4 @@
+# Every path in this repository is owned by @mdarabi.
+# Combined with "Require review from Code Owners" branch protection on main,
+# this makes @mdarabi approval mandatory for every pull request.
+* @mdarabi
