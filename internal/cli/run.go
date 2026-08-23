@@ -94,6 +94,10 @@ func newRootCommand(streams IO, exitCode *int) *cobra.Command {
 				if cobraHelpRequested(command, args, exitCode) {
 					return
 				}
+				if name == "provider" && renderProviderNestedHelp(args, streams.Out) {
+					*exitCode = 0
+					return
+				}
 				var runtime bootstrap.Runtime
 				var err error
 				if diagnostic {
@@ -135,7 +139,10 @@ func newRootCommand(streams IO, exitCode *int) *cobra.Command {
 	addRuntimeCommand("classifier", "classifier [operation]", "Manage local classifier overrides", false, func(_ context.Context, args []string, runtime bootstrap.Runtime, streams IO) int {
 		return runClassifier(args, runtime, streams)
 	})
-	addRuntimeCommand("provider", "provider [operation]", "List, select, configure, or test providers", false, runProvider)
+	providerCommand := addRuntimeCommand("provider", "provider <command>", "List, select, configure, or test providers", false, runProvider)
+	providerCommand.SetHelpFunc(func(command *cobra.Command, _ []string) {
+		printProviderHelp(command.OutOrStdout(), "")
+	})
 	addRuntimeCommand("config", "config [get|set|list]", "Read or update typed configuration", false, func(_ context.Context, args []string, runtime bootstrap.Runtime, streams IO) int {
 		return runConfig(args, runtime, streams)
 	})
@@ -418,19 +425,31 @@ func readMaybeInteractiveLine(reader io.Reader, limit int64, interactive bool) (
 }
 
 func runProvider(ctx context.Context, args []string, rt bootstrap.Runtime, streams IO) int {
-	if len(args) == 0 || args[0] == "list" {
-		providers := rt.Engine.Providers.List()
-		sort.Slice(providers, func(i, j int) bool { return providers[i].ID() < providers[j].ID() })
-		for _, p := range providers {
-			d := p.Diagnose(ctx)
-			fmt.Fprintf(streams.Out, "%-10s installed=%t configured=%t authenticated=%t usable=%t auth=%s version=%s %s\n", p.ID(), d.Installed, d.Configured, d.Authenticated, d.Available, d.AuthMode, d.Version, d.Message)
-			printProviderRecovery(streams.Out, d, "  ")
-		}
+	if len(args) == 0 {
+		printProviderHelp(streams.Out, rt.Config.Provider)
 		return 0
 	}
 	switch args[0] {
-	case "use":
+	case "help":
+		if len(args) == 1 {
+			printProviderHelp(streams.Out, rt.Config.Provider)
+			return 0
+		}
+		if len(args) == 2 && validProviderHelpCommand(args[1]) {
+			printProviderCommandHelp(streams.Out, args[1])
+			return 0
+		}
+		fmt.Fprintln(streams.Err, "Usage: humansh provider help [list|use|select|configure|test]")
+		return 2
+	case "list":
+		return runProviderList(ctx, args[1:], rt, streams)
+	case "use", "select":
+		if providerHelpRequested(args[1:]) {
+			printProviderCommandHelp(streams.Out, args[0])
+			return 0
+		}
 		if len(args) != 2 {
+			fmt.Fprintln(streams.Err, "Usage: humansh provider use <codex|claude|cursor|openrouter>")
 			return 2
 		}
 		id := llm.ProviderID(args[1])
@@ -456,10 +475,16 @@ func runProvider(ctx context.Context, args []string, rt bootstrap.Runtime, strea
 			fmt.Fprintln(streams.Err, err)
 			return protocol.ExitConfig
 		}
-		fmt.Fprintf(streams.Out, "Active provider: %s\n", cfg.Provider)
+		fmt.Fprintf(streams.Out, "✓ Active provider: %s (%s)\n", cfg.Provider.Label(), cfg.Provider)
+		fmt.Fprintln(streams.Out, "Next: run `humansh provider test` to verify a real translation.")
 		return 0
 	case "test":
+		if providerHelpRequested(args[1:]) {
+			printProviderCommandHelp(streams.Out, "test")
+			return 0
+		}
 		if len(args) > 2 {
+			fmt.Fprintln(streams.Err, "Usage: humansh provider test [codex|claude|cursor|openrouter]")
 			return 2
 		}
 		id := rt.Config.Provider
@@ -468,6 +493,7 @@ func runProvider(ctx context.Context, args []string, rt bootstrap.Runtime, strea
 		}
 		p, ok := rt.Engine.Providers.Get(id)
 		if !ok {
+			fmt.Fprintf(streams.Err, "Unknown provider %q. Choose codex, claude, cursor, or openrouter.\n", id)
 			return protocol.ExitProviderUnavailable
 		}
 		d := p.Diagnose(ctx)
@@ -488,9 +514,17 @@ func runProvider(ctx context.Context, args []string, rt bootstrap.Runtime, strea
 		fmt.Fprintln(streams.Out, string(data))
 		return 0
 	case "configure":
+		if providerHelpRequested(args[1:]) {
+			printProviderCommandHelp(streams.Out, "configure")
+			return 0
+		}
 		if len(args) < 2 {
-			fmt.Fprintln(streams.Err, "usage: humansh provider configure openrouter [--model slug] [--yes]")
-			return 2
+			printProviderCommandHelp(streams.Out, "configure")
+			return 0
+		}
+		if providerHelpRequested(args[2:]) {
+			printProviderCommandHelp(streams.Out, "configure")
+			return 0
 		}
 		switch args[1] {
 		case "openrouter":
@@ -510,9 +544,13 @@ func runProvider(ctx context.Context, args []string, rt bootstrap.Runtime, strea
 			fmt.Fprintln(streams.Out, "Run `cursor-agent login`, then `humansh provider test cursor`.")
 			return 0
 		default:
+			fmt.Fprintf(streams.Err, "Unknown provider %q. Choose codex, claude, cursor, or openrouter.\n", args[1])
+			fmt.Fprintln(streams.Err, "Next: run `humansh provider help configure` for examples.")
 			return 2
 		}
 	default:
+		fmt.Fprintf(streams.Err, "Unknown provider command %q.\n", args[0])
+		fmt.Fprintln(streams.Err, "Next: run `humansh provider help` to see the available commands.")
 		return 2
 	}
 }
@@ -1824,7 +1862,7 @@ Usage:
   humansh smart|translate|analyze [protocol flags] < input
   humansh classify [--json] < input
   humansh classifier list|add-command|remove-command|add-english-prefix|remove-english-prefix
-  humansh provider list|use|test|configure
+  humansh provider <list|use|select|configure|test|help>
   humansh config get|set|list
   humansh doctor [--fix] [--json]
   humansh uninstall [--purge] [--yes]

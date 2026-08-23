@@ -102,6 +102,12 @@ humansh provider test cursor
 humansh provider configure openrouter --model provider/model
 ```
 
+Run `humansh provider` or `humansh provider help` for oriented command help and
+examples. `humansh provider list` prints a compact readiness view and marks the
+current provider; use `humansh provider list --json` when complete diagnostics
+are needed by a script. `humansh provider select <name>` is accepted as an alias
+for `provider use <name>`.
+
 There is no silent fallback to metered OpenRouter.
 
 CLI providers are selectable only when their applicable version floor and direct capability checks confirm every mandatory non-interactive isolation control. Every translation still supplies the complete isolation argument set; a rejected setting fails closed. See [providers](docs/providers.md) for provider-specific limits and account-backed behavioral release gates.

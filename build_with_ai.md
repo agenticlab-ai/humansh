@@ -639,11 +639,13 @@ Analyze a command from stdin and print syntax-validity and risk information with
 
 ### `humansh provider list`
 
-Show configured, installed, authenticated, and usable states for Codex, Claude Code, Cursor CLI, and OpenRouter.
+By default, show a compact human-readable readiness view for Codex, Claude Code, Cursor CLI, and OpenRouter. Show each display label beside its Humansh command name (`codex`, `claude`, `cursor`, or `openrouter`) so the user knows which value to pass to other provider commands. Clearly mark the current provider, use the same readiness labels as setup, and show at most the first actionable recovery command for each unavailable provider. Do not dump raw diagnostic booleans, capability arrays, executable paths, or JSON in the default view. Support `--json` for the complete machine-readable diagnostics, including a `current` field.
 
 ### `humansh provider use <codex|claude|cursor|openrouter>`
 
 Atomically update the active provider after verifying that its basic configuration is usable. If it is not usable, refuse the change and print the exact fix.
+
+Accept `humansh provider select <name>` as an alias. Running `humansh provider` or `humansh provider help` must show the available provider operations, valid provider names, concrete examples, and the next useful command. Every provider operation must support discoverable command-specific help.
 
 ### `humansh provider configure <name>`
 

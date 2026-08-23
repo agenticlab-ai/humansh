@@ -942,6 +942,148 @@ func (*setupTestProvider) Translate(context.Context, llm.TranslationRequest) (ll
 	return llm.TranslationResponse{}, nil
 }
 
+func TestProviderHelpExplainsCommandsAndNextStep(t *testing.T) {
+	t.Parallel()
+	rt := bootstrap.Runtime{Config: config.Default()}
+	rt.Config.Provider = llm.Cursor
+	var out, errOut bytes.Buffer
+
+	code := runProvider(context.Background(), nil, rt, IO{Out: &out, Err: &errOut})
+	if code != 0 || errOut.Len() != 0 {
+		t.Fatalf("code=%d out=%s err=%s", code, out.String(), errOut.String())
+	}
+	for _, want := range []string{
+		"Manage AI providers",
+		"Current: Cursor CLI (cursor)",
+		"list [--json]",
+		"use <name>",
+		"select <name>",
+		"configure <name> [options]",
+		"test [name]",
+		"Provider names:",
+		"humansh provider list",
+		"Next:",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("provider help missing %q:\n%s", want, out.String())
+		}
+	}
+
+	out.Reset()
+	code = runProvider(context.Background(), []string{"configure"}, rt, IO{Out: &out, Err: &errOut})
+	if code != 0 || !strings.Contains(out.String(), "Configure a provider's authentication or model") || !strings.Contains(out.String(), "configure openrouter --model") {
+		t.Fatalf("configure help code=%d out=%s err=%s", code, out.String(), errOut.String())
+	}
+
+	out.Reset()
+	code = runProvider(context.Background(), []string{"select", "--help"}, rt, IO{Out: &out, Err: &errOut})
+	if code != 0 || !strings.Contains(out.String(), "Verify and select the active provider") {
+		t.Fatalf("select help code=%d out=%s err=%s", code, out.String(), errOut.String())
+	}
+}
+
+func TestProviderCobraHelpUsesOrientedGuide(t *testing.T) {
+	t.Parallel()
+	var out, errOut bytes.Buffer
+	code := Run(context.Background(), []string{"provider", "--help"}, IO{Out: &out, Err: &errOut})
+	if code != 0 || errOut.Len() != 0 {
+		t.Fatalf("code=%d out=%s err=%s", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "Manage AI providers") || !strings.Contains(out.String(), "humansh provider configure openrouter") {
+		t.Fatalf("provider --help was not oriented:\n%s", out.String())
+	}
+
+	out.Reset()
+	code = Run(context.Background(), []string{"provider", "configure", "--help"}, IO{Out: &out, Err: &errOut})
+	if code != 0 || errOut.Len() != 0 || !strings.Contains(out.String(), "Configure a provider's authentication or model") {
+		t.Fatalf("provider configure --help code=%d out=%s err=%s", code, out.String(), errOut.String())
+	}
+}
+
+func TestProviderListIsReadableAndMarksCurrentProvider(t *testing.T) {
+	t.Parallel()
+	providers := llm.MapRegistry{
+		llm.OpenRouter: &setupTestProvider{id: llm.OpenRouter, diagnostic: llm.Diagnostic{
+			Installed: true, AuthMode: "missing", Message: "API key not configured",
+		}},
+		llm.Cursor: &setupTestProvider{id: llm.Cursor, diagnostic: llm.Diagnostic{
+			Installed: true, Configured: true, Authenticated: true, Available: true, AuthMode: "cursor.com", Version: "2026.08.11",
+		}},
+		llm.Claude: &setupTestProvider{id: llm.Claude, diagnostic: llm.Diagnostic{
+			Installed: true, Configured: true, AuthMode: "logged_out", Capabilities: []string{"safe-mode"},
+			NextSteps: []llm.DiagnosticAction{{Description: "Sign in", Command: "/selected/claude auth login --claudeai"}},
+		}},
+		llm.Codex: &setupTestProvider{id: llm.Codex, diagnostic: llm.Diagnostic{
+			Installed: true, Configured: true, Authenticated: true, Available: true, AuthMode: "chatgpt",
+		}},
+	}
+	cfg := config.Default()
+	cfg.Provider = llm.Cursor
+	rt := bootstrap.Runtime{Engine: app.Engine{Providers: providers}, Config: cfg}
+	var out, errOut bytes.Buffer
+
+	code := runProvider(context.Background(), []string{"list"}, rt, IO{Out: &out, Err: &errOut})
+	if code != 0 || errOut.Len() != 0 {
+		t.Fatalf("code=%d out=%s err=%s", code, out.String(), errOut.String())
+	}
+	text := out.String()
+	for _, want := range []string{
+		"AI providers",
+		"PROVIDER     HUMANSH NAME  STATUS",
+		"✓ Codex        codex",
+		"Ready — ChatGPT subscription",
+		"Claude Code  claude",
+		"Fresh CLI logged out",
+		"Next: /selected/claude auth login --claudeai",
+		"✓ Cursor CLI   cursor",
+		"Ready — Cursor account  (current)",
+		"OpenRouter   openrouter",
+		"Not configured — metered",
+		"Next: humansh provider configure openrouter",
+		"Switch:     humansh provider use <name>",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("provider list missing %q:\n%s", want, text)
+		}
+	}
+	for _, unwanted := range []string{"installed=", "configured=", "authenticated=", "usable=", "2026.08.11", "safe-mode"} {
+		if strings.Contains(text, unwanted) {
+			t.Errorf("provider list exposed raw diagnostic %q:\n%s", unwanted, text)
+		}
+	}
+	previous := -1
+	for _, name := range []string{"Codex", "Claude Code", "Cursor CLI", "OpenRouter"} {
+		index := strings.Index(text, name)
+		if index <= previous {
+			t.Errorf("provider ordering is unclear: %q index=%d previous=%d\n%s", name, index, previous, text)
+		}
+		previous = index
+	}
+}
+
+func TestProviderListJSONIncludesCurrentAndCompleteDiagnostics(t *testing.T) {
+	t.Parallel()
+	provider := &setupTestProvider{id: llm.Claude, diagnostic: llm.Diagnostic{
+		Installed: true, Configured: true, Authenticated: true, Available: true, AuthMode: "claude.ai", Executable: "/selected/claude",
+	}}
+	cfg := config.Default()
+	cfg.Provider = llm.Claude
+	rt := bootstrap.Runtime{Engine: app.Engine{Providers: llm.MapRegistry{llm.Claude: provider}}, Config: cfg}
+	var out, errOut bytes.Buffer
+
+	code := runProvider(context.Background(), []string{"list", "--json"}, rt, IO{Out: &out, Err: &errOut})
+	if code != 0 || errOut.Len() != 0 {
+		t.Fatalf("code=%d out=%s err=%s", code, out.String(), errOut.String())
+	}
+	var result providerListResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("invalid provider list JSON: %v\n%s", err, out.String())
+	}
+	if result.Current != llm.Claude || len(result.Providers) != 1 || !result.Providers[0].Current || result.Providers[0].Diagnostic.Executable != "/selected/claude" {
+		t.Fatalf("unexpected provider list JSON: %+v", result)
+	}
+}
+
 func TestInteractiveSetupCanRunOfficialSubscriptionLogin(t *testing.T) {
 	provider := &setupTestProvider{id: llm.Codex, diagnostic: llm.Diagnostic{Installed: true, Configured: true, AuthMode: "api_key", Capabilities: []string{"safe-mode"}, Message: "usage-based API key"}}
 	rt := bootstrap.Runtime{Engine: app.Engine{Providers: llm.MapRegistry{llm.Codex: provider}}, Config: config.Default()}
