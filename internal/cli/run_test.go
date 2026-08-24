@@ -293,7 +293,7 @@ func TestSetupConfiguresBashReadlineIntegration(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".zshrc")); !os.IsNotExist(err) {
 		t.Fatalf("Bash setup unexpectedly edited .zshrc: %v", err)
 	}
-	for _, want := range []string{"Bash", "Explicit translation", "load automatically in each configured shell", "Bash: type natural language and press Ctrl-G; Enter runs normal Bash commands."} {
+	for _, want := range []string{"Bash Enter", "Runs as typed", "load automatically in each configured shell", "Bash: type natural language and press Ctrl-G; Enter runs normal Bash commands."} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("Bash setup output missing %q:\n%s", want, out.String())
 		}
