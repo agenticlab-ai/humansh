@@ -70,9 +70,44 @@ func TestInteractiveSetupEditsEveryTranslationAndShellPreference(t *testing.T) {
 		t.Fatalf("friendly shortcuts were not parsed: %+v", cfg.Shell)
 	}
 	text := out.String()
-	for _, want := range []string{"Directory context", "Provider timeout", "Smart Enter", "Clear command line", "Escape normally enters command mode", "Ctrl-G replaces stock send-break", "Ctrl-U normally erases", "Ctrl-X is a prefix", "Plain Ctrl-X runs immediately"} {
+	for _, want := range []string{"Directory context", "Provider timeout", "Zsh Enter", "Clear input", "Esc and Ctrl-G may already be used", "Ctrl-U will no longer clear", "Ctrl-X will run immediately"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("setup output missing %q:\n%s", want, text)
+		}
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("unexpected stderr: %s", errOut.String())
+	}
+}
+
+func TestSetupShellControlsUsePlainLanguage(t *testing.T) {
+	t.Parallel()
+	cfg := config.Default()
+	var out, errOut bytes.Buffer
+	ui := interactiveSetupUI("\n\n\n", &out, &errOut)
+
+	if err := configureSetupShell(&cfg, []shell.ID{shell.Bash}, ui); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	for _, want := range []string{
+		"Bash Enter",
+		"Runs as typed",
+		"Use the translate shortcut for English requests.",
+		"Clear input",
+		"Translate request",
+		"Run as typed",
+		"Also confirms a translated command marked high risk.",
+		"Esc and Ctrl-G may already be used by your shell or terminal.",
+		"If it includes Enter, type its name instead",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("setup output missing %q:\n%s", want, text)
+		}
+	}
+	for _, jargon := range []string{"Readline", "stock abort binding", "vi insert mode", "Alt escape sequences", "key-sequence timeout", "prefix and waits silently"} {
+		if strings.Contains(text, jargon) {
+			t.Errorf("setup output still contains %q:\n%s", jargon, text)
 		}
 	}
 	if errOut.Len() != 0 {
@@ -325,10 +360,10 @@ func TestRawShortcutCaptureRepresentsPhysicalControlKeys(t *testing.T) {
 	}
 }
 
-func TestCtrlRShortcutWarnsAboutHistorySearch(t *testing.T) {
+func TestCtrlRShortcutWarnsAboutCommandHistory(t *testing.T) {
 	t.Parallel()
 	warning := setupShortcutCollision("^R")
-	if !strings.Contains(warning, "reverse history search") {
+	if !strings.Contains(warning, "command history") {
 		t.Fatalf("Ctrl-R collision warning=%q", warning)
 	}
 }
