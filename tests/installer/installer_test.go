@@ -295,6 +295,67 @@ exit 91`
 	}
 }
 
+func TestInteractiveInstallerRunsOnboardingAfterInstallationCommits(t *testing.T) {
+	repo := repositoryRoot(t)
+	home := t.TempDir()
+	fixtures := filepath.Join(home, "fixtures")
+	if err := os.Mkdir(fixtures, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	replacement := filepath.Join(fixtures, "replacement")
+	program := `#!/bin/sh
+case ${1-} in
+  setup) echo SETUP_COMPLETE ;;
+  onboarding) echo ONBOARDING_STARTED ;;
+  *) exit 2 ;;
+esac
+`
+	if err := os.WriteFile(replacement, []byte(program), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeBin := filepath.Join(home, "fake-bin")
+	if err := os.Mkdir(fakeBin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fakeGo := "#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = -o ]; then cp \"$HUMANSH_FAKE_REPLACEMENT\" \"$2\"; exit 0; fi\n  shift\ndone\nexit 2\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "go"), []byte(fakeGo), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wrapper := filepath.Join(fixtures, "run-installer")
+	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\nsh \"$HUMANSH_INSTALLER\" --local\nresult=$?\necho INSTALL_STATUS:$result\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := isolatedEnvironment(home)
+	env = removeEnvironmentKey(env, "HUMANSH_NONINTERACTIVE")
+	env = replaceEnvironmentValue(env, "PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	env = append(env, "HUMANSH_FAKE_REPLACEMENT="+replacement, "HUMANSH_INSTALLER="+filepath.Join(repo, "scripts", "install.sh"))
+	ptyScript := `zmodload zsh/zpty || exit 90
+zpty -b I "$HUMANSH_INSTALL_WRAPPER"
+seen=''
+for attempt in {1..500}; do
+  while zpty -r -t I chunk; do seen+=$chunk; done
+  [[ $seen == *INSTALL_STATUS:0* ]] && { print -r -- "$seen"; zpty -d I; exit 0; }
+  sleep 0.02
+done
+print -ru2 -- "installer did not finish: ${(V)seen}"
+zpty -d I
+exit 91`
+	command := exec.Command("zsh", "-f", "-c", ptyScript)
+	command.Dir = repo
+	command.Env = append(env, "HUMANSH_INSTALL_WRAPPER="+wrapper)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("interactive installer PTY: %v\n%s", err, output)
+	}
+	text := string(output)
+	setupIndex := strings.Index(text, "SETUP_COMPLETE")
+	installedIndex := strings.Index(text, "Installed humansh to")
+	onboardingIndex := strings.Index(text, "ONBOARDING_STARTED")
+	if setupIndex < 0 || installedIndex <= setupIndex || onboardingIndex <= installedIndex {
+		t.Fatalf("installer did not run onboarding after setup and installation commit:\n%s", text)
+	}
+}
+
 func TestUninstallFailsClosedOnCorruptMarkers(t *testing.T) {
 	repo := repositoryRoot(t)
 	home := t.TempDir()

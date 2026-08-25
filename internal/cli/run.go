@@ -146,6 +146,7 @@ func newRootCommand(streams IO, exitCode *int) *cobra.Command {
 	addRuntimeCommand("config", "config [get|set|list]", "Read or update typed configuration", false, func(_ context.Context, args []string, runtime bootstrap.Runtime, streams IO) int {
 		return runConfig(args, runtime, streams)
 	})
+	addRuntimeCommand("onboarding", "onboarding [zsh|bash]", "Learn the translate, review, and execute flow", false, runOnboarding)
 	setupCommand := addRuntimeCommand("setup", "setup [flags]", "Configure providers and all supported shell integrations", false, runSetup)
 	setupCommand.Flags().Bool("yes", false, "use safe defaults without prompts")
 	setupCommand.Flags().String("provider", "", "provider to select")
@@ -1857,6 +1858,7 @@ Usage:
   humansh classifier list|add-command|remove-command|add-english-prefix|remove-english-prefix
   humansh provider <list|use|select|configure|test|help>
   humansh config get|set|list
+  humansh onboarding [zsh|bash]
   humansh doctor [--fix] [--json]
   humansh uninstall [--purge] [--yes]
   humansh version [--json]`)

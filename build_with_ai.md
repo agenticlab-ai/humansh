@@ -587,6 +587,12 @@ Required flags:
 --no-shell-change     Do not edit startup files; print every applicable exact block.
 ```
 
+### `humansh onboarding [zsh|bash]`
+
+Show a concise shell-specific practice flow using the user's configured bindings. For Zsh with Smart Enter enabled, ask the user to type `list all the files in this directory`, press Enter once to translate it for review, and press Enter again only if the generated command looks correct. If Smart Enter is disabled, show the configured force-translation shortcut instead. For Bash, explicitly tell the user to use the configured force-translation shortcut before Enter because Bash preserves normal Enter behavior. Explain that translation only replaces the editable line and does not execute it. Show the configured clear-line shortcut as the cancel action.
+
+With no shell argument, use the installed shell-integration state. Show Zsh first when configured. If Bash is also configured and the command is interactive, ask whether the user wants the Bash walkthrough too; if it is non-interactive, point to `humansh onboarding bash`. Reject a requested shell that is not configured and show the exact setup command. The walkthrough never starts or replaces a shell process.
+
 ### `humansh smart`
 
 Machine-facing command used by a shell integration. Read the entire current buffer from stdin. It must not accept the user's input as a required positional argument.
@@ -2131,7 +2137,8 @@ It should:
 1. Build the Go binary if needed.
 2. Install to `~/.local/bin/humansh` without `sudo`.
 3. Run `humansh setup` interactively when stdin is a TTY.
-4. Tell the user to open a new terminal so each configured shell loads its own integration. Do not execute a shell automatically because an installer child cannot replace its parent process and cannot reliably identify a nested current shell from `$SHELL`.
+4. After setup commits and the binary installation is committed, run `humansh onboarding` on the same interactive terminal. Onboarding failure must not roll back a successful installation; print the command for retrying it.
+5. Tell the user to use a new terminal so each configured shell loads its own integration. Do not execute a shell automatically because an installer child cannot replace its parent process and cannot reliably identify a nested current shell from `$SHELL`.
 
 Also provide:
 
@@ -2150,8 +2157,9 @@ The root installer should:
 4. Install without root into `~/.local/bin` by default.
 5. Add `~/.local/bin` to PATH only through each installed shell's small idempotent managed startup block when needed.
 6. Invoke `humansh setup`.
-7. Never silently install Codex, Claude Code, Cursor CLI, Homebrew, Go, or other third-party software.
-8. On any failure, print a direct fix rather than leaving a partial setup.
+7. After a successful interactive setup and committed binary installation, invoke `humansh onboarding` without starting a nested shell.
+8. Never silently install Codex, Claude Code, Cursor CLI, Homebrew, Go, or other third-party software.
+9. On any failure, print a direct fix rather than leaving a partial setup.
 
 The checksum establishes download integrity only when it comes from the same release host as the binary; it does not by itself authenticate a compromised release host. Prefer a signed checksum, release signature, or provenance attestation verified from an independently established trust root. If releases are not signed, say so plainly in `docs/security.md` and do not describe same-host SHA-256 verification as authenticity.
 

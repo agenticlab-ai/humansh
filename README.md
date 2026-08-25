@@ -7,6 +7,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/github/go-mod/go-version/mdarabi/humansh)](go.mod)
 
+![Humansh turns a plain-English request into an editable shell command, then runs it only after the user reviews it and presses Enter again.](docs/assets/humansh-demo.gif)
+
 ```text
 % git status
 # runs immediately — humansh recognises a real command and stays out of the way
@@ -79,6 +81,8 @@ Open a new terminal, then try:
 ```text
 show me the largest files in this folder
 ```
+
+After an interactive installation completes, Humansh shows a short walkthrough using the configured shell controls. The Zsh guide teaches the two-Enter translate/review/execute flow when Smart Enter is enabled. If Bash is configured, the user can opt into its separate guide, which teaches the force-translation shortcut because Bash keeps Enter for normal commands. Run `humansh onboarding`, `humansh onboarding zsh`, or `humansh onboarding bash` to repeat the walkthrough later.
 
 ## Keys and shell modes
 
