@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/humansh/humansh/internal/llm"
-	"github.com/humansh/humansh/internal/validate"
+	"github.com/agenticlab-ai/humansh/internal/llm"
+	"github.com/agenticlab-ai/humansh/internal/validate"
 )
 
 func TestRealCodexReleaseMeasurements(t *testing.T) {

@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/humansh/humansh/internal/bootstrap"
-	"github.com/humansh/humansh/internal/llm"
+	"github.com/agenticlab-ai/humansh/internal/bootstrap"
+	"github.com/agenticlab-ai/humansh/internal/llm"
 )
 
 type providerListItem struct {

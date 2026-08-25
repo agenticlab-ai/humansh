@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/humansh/humansh/internal/shell"
+	"github.com/agenticlab-ai/humansh/internal/shell"
 )
 
 type UninstallOptions struct {

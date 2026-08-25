@@ -36,7 +36,7 @@ for target in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64; do
   name="humansh-$os-$arch"
   temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/humansh-release.XXXXXX")
   GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath \
-    -ldflags "-s -w -X github.com/humansh/humansh/internal/version.Version=$version -X github.com/humansh/humansh/internal/version.Commit=$commit -X github.com/humansh/humansh/internal/version.BuildDate=$build_date" \
+    -ldflags "-s -w -X github.com/agenticlab-ai/humansh/internal/version.Version=$version -X github.com/agenticlab-ai/humansh/internal/version.Commit=$commit -X github.com/agenticlab-ai/humansh/internal/version.BuildDate=$build_date" \
     -o "$temp_dir/humansh" ./cmd/humansh
   tar -czf "$dist/$name.tar.gz" -C "$temp_dir" humansh
   rm -rf "$temp_dir"

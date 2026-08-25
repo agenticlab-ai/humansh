@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	usererr "github.com/humansh/humansh/internal/errors"
-	"github.com/humansh/humansh/internal/llm"
+	usererr "github.com/agenticlab-ai/humansh/internal/errors"
+	"github.com/agenticlab-ai/humansh/internal/llm"
 )
 
 func TestCLIErrorCatalogMappings(t *testing.T) {

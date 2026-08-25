@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/humansh/humansh/internal/processrunner"
-	"github.com/humansh/humansh/internal/shell"
-	"github.com/humansh/humansh/internal/shell/contracttest"
-	"github.com/humansh/humansh/internal/shell/protocol"
+	"github.com/agenticlab-ai/humansh/internal/processrunner"
+	"github.com/agenticlab-ai/humansh/internal/shell"
+	"github.com/agenticlab-ai/humansh/internal/shell/contracttest"
+	"github.com/agenticlab-ai/humansh/internal/shell/protocol"
 )
 
 type versionRunner struct{ version string }

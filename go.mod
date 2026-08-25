@@ -1,4 +1,4 @@
-module github.com/humansh/humansh
+module github.com/agenticlab-ai/humansh
 
 go 1.25.0
 

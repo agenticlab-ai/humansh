@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	usererr "github.com/humansh/humansh/internal/errors"
-	"github.com/humansh/humansh/internal/exitcode"
-	"github.com/humansh/humansh/internal/llm"
-	"github.com/humansh/humansh/internal/llm/contracttest"
-	"github.com/humansh/humansh/internal/processrunner"
+	usererr "github.com/agenticlab-ai/humansh/internal/errors"
+	"github.com/agenticlab-ai/humansh/internal/exitcode"
+	"github.com/agenticlab-ai/humansh/internal/llm"
+	"github.com/agenticlab-ai/humansh/internal/llm/contracttest"
+	"github.com/agenticlab-ai/humansh/internal/processrunner"
 )
 
 type fakeRunner struct {

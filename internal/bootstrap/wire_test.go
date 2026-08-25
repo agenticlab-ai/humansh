@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/humansh/humansh/internal/config"
-	"github.com/humansh/humansh/internal/llm"
-	"github.com/humansh/humansh/internal/llm/claude"
-	"github.com/humansh/humansh/internal/llm/cursor"
-	"github.com/humansh/humansh/internal/shell"
+	"github.com/agenticlab-ai/humansh/internal/config"
+	"github.com/agenticlab-ai/humansh/internal/llm"
+	"github.com/agenticlab-ai/humansh/internal/llm/claude"
+	"github.com/agenticlab-ai/humansh/internal/llm/cursor"
+	"github.com/agenticlab-ai/humansh/internal/shell"
 )
 
 func TestCompositionRootResolvesAllConfiguredAdaptersWithoutLoadingSecrets(t *testing.T) {

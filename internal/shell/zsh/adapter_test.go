@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/humansh/humansh/internal/shell"
-	"github.com/humansh/humansh/internal/shell/contracttest"
-	"github.com/humansh/humansh/internal/shell/protocol"
+	"github.com/agenticlab-ai/humansh/internal/shell"
+	"github.com/agenticlab-ai/humansh/internal/shell/contracttest"
+	"github.com/agenticlab-ai/humansh/internal/shell/protocol"
 )
 
 func TestSyntaxCheckDoesNotExecute(t *testing.T) {

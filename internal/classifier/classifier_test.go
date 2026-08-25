@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/humansh/humansh/internal/config"
-	"github.com/humansh/humansh/internal/shell"
+	"github.com/agenticlab-ai/humansh/internal/config"
+	"github.com/agenticlab-ai/humansh/internal/shell"
 )
 
 func TestPureClassifierP95Target(t *testing.T) {

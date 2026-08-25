@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/humansh/humansh/internal/config"
-	"github.com/humansh/humansh/internal/shell"
+	"github.com/agenticlab-ai/humansh/internal/config"
+	"github.com/agenticlab-ai/humansh/internal/shell"
 )
 
 type Classification string

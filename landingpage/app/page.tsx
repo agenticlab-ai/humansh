@@ -1,6 +1,6 @@
 import { CopyInstallButton } from "./copy-install-button";
 
-const githubUrl = "https://github.com/mdarabi/humansh";
+const githubUrl = "https://github.com/agenticlab-ai/humansh";
 const installCommand =
   "curl -fsSL https://humansh.com/install | bash";
 

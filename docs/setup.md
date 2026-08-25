@@ -7,7 +7,7 @@
 ### From a release
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mdarabi/humansh/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/agenticlab-ai/humansh/main/scripts/install.sh | bash
 ```
 
 The installer downloads the matching binary from the latest GitHub release and verifies its SHA-256 checksum before installing to `~/.local/bin`. It never installs Codex, Claude Code, Cursor, Homebrew, Go, or any other third-party software on your behalf.
