@@ -477,7 +477,7 @@ func TestCobraCommandTreeHelpDoesNotLoadConfiguration(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte("malformed"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"--help"}, {"smart", "--help"}, {"help", "doctor"}, {"uninstall", "--help"}} {
+	for _, args := range [][]string{{"--help"}, {"smart", "--help"}, {"help", "doctor"}, {"onboarding", "--help"}, {"uninstall", "--help"}} {
 		var out, errOut bytes.Buffer
 		code := Run(context.Background(), args, IO{In: strings.NewReader(""), Out: &out, Err: &errOut})
 		if code != 0 || errOut.Len() != 0 || !strings.Contains(out.String(), "Usage:") {

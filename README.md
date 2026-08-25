@@ -2,6 +2,8 @@
 
 `humansh` adds conservative natural-language command translation to ordinary interactive Zsh and Bash prompts. Provider output is inserted into the editable command line for review and is never executed automatically.
 
+![Humansh turns a plain-English request into an editable shell command, then runs it only after the user reviews it and presses Enter again.](docs/assets/humansh-demo.gif)
+
 ```text
 % show me which process is listening on port 3000
 lsof -nP -iTCP:3000 -sTCP:LISTEN
@@ -47,6 +49,8 @@ If Codex, Claude Code, or Cursor CLI is installed but logged out, interactive se
 Provider checks apply to a fresh subprocess, because that is what humansh starts for each translation. Interactive setup always shows a compact four-provider menu and asks what to use; the saved provider is only the default answer. Troubleshooting details stay hidden for providers you do not select. If multiple Claude or Cursor CLI installations are present in `PATH`, setup lets you keep automatic selection or pin one exact executable; shell aliases and the Cursor editor launcher are intentionally not used.
 
 Setup requires one proven, ready provider and stops before writing credentials, configuration, or shell integration when none is selected. The required OpenRouter compatibility check runs automatically after the user selects OpenRouter and supplies its key and model; if the check fails, setup stops rather than producing an unusable installation. The installer replaces the binary atomically and restores the previous binary whenever interactive setup does not complete.
+
+After an interactive installation completes, Humansh shows a short walkthrough using the configured shell controls. The Zsh guide teaches the two-Enter translate/review/execute flow when Smart Enter is enabled. If Bash is configured, the user can opt into its separate guide, which teaches the force-translation shortcut because Bash keeps Enter for normal commands. Run `humansh onboarding`, `humansh onboarding zsh`, or `humansh onboarding bash` to repeat the walkthrough later.
 
 ## Keys and shell modes
 

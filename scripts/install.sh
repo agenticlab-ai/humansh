@@ -119,17 +119,20 @@ binary_temp=
 binary_replaced=1
 
 setup_status=0
+onboarding_io=
 setup_hint="$binary setup"
 [ -z "$target_shell" ] || setup_hint="$setup_hint --shell $target_shell"
 if [ "${HUMANSH_NONINTERACTIVE:-0}" = 1 ]; then
   echo "Run '$setup_hint' from a terminal to finish setup."
 elif [ -t 0 ]; then
+	onboarding_io='stdio'
 	if [ -n "$target_shell" ]; then
 		if "$binary" setup --shell "$target_shell"; then :; else setup_status=$?; fi
 	else
 		if "$binary" setup; then :; else setup_status=$?; fi
 	fi
 elif (: </dev/tty) 2>/dev/null; then
+	onboarding_io='tty'
 	if [ -n "$target_shell" ]; then
 		if "$binary" setup --shell "$target_shell" </dev/tty >/dev/tty 2>/dev/tty; then :; else setup_status=$?; fi
 	else
@@ -146,3 +149,13 @@ install_committed=1
 [ -z "$previous_binary" ] || rm -f "$previous_binary"
 previous_binary=
 echo "Installed humansh to $binary"
+case $onboarding_io in
+  stdio)
+	if "$binary" onboarding; then :; else
+		echo "humansh installer: onboarding could not be shown. Run '$binary onboarding' later." >&2
+	fi ;;
+  tty)
+	if "$binary" onboarding </dev/tty >/dev/tty 2>/dev/tty; then :; else
+		echo "humansh installer: onboarding could not be shown. Run '$binary onboarding' later." >&2
+	fi ;;
+esac
