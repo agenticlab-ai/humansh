@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/humansh/humansh/internal/config"
-	"github.com/humansh/humansh/internal/shell"
-	"github.com/humansh/humansh/internal/shell/protocol"
+	"github.com/agenticlab-ai/humansh/internal/config"
+	"github.com/agenticlab-ai/humansh/internal/shell"
+	"github.com/agenticlab-ai/humansh/internal/shell/protocol"
 )
 
 func TestOnboardingBeforeSetupShowsTheNextStep(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/humansh/humansh/internal/cli"
+	"github.com/agenticlab-ai/humansh/internal/cli"
 )
 
 func main() {

@@ -13,8 +13,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/humansh/humansh/internal/llm"
-	"github.com/humansh/humansh/internal/shell"
+	"github.com/agenticlab-ai/humansh/internal/llm"
+	"github.com/agenticlab-ai/humansh/internal/shell"
 )
 
 type Paths struct {

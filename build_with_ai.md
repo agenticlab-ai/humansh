@@ -2117,10 +2117,10 @@ Requirements:
 The eventual user experience should be one command followed by a short guided setup:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mdarabi/humansh/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/agenticlab-ai/humansh/main/scripts/install.sh | bash
 ```
 
-The installer defaults release downloads to `mdarabi/humansh`. Preserve `HUMANSH_REPOSITORY=owner/repository` as an explicit override for forks and release mirrors.
+The installer defaults release downloads to `agenticlab-ai/humansh`. Preserve `HUMANSH_REPOSITORY=owner/repository` as an explicit override for forks and release mirrors.
 
 ### 16.1 Checked-out repository flow
 

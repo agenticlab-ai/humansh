@@ -1,6 +1,6 @@
 package protocol
 
-import "github.com/humansh/humansh/internal/exitcode"
+import "github.com/agenticlab-ai/humansh/internal/exitcode"
 
 const (
 	Version         = "zle-v1"

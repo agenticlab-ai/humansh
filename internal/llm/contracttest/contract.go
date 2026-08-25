@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	usererr "github.com/humansh/humansh/internal/errors"
-	"github.com/humansh/humansh/internal/exitcode"
-	"github.com/humansh/humansh/internal/llm"
+	usererr "github.com/agenticlab-ai/humansh/internal/errors"
+	"github.com/agenticlab-ai/humansh/internal/exitcode"
+	"github.com/agenticlab-ai/humansh/internal/llm"
 )
 
 type FailureCase func(context.Context) error
