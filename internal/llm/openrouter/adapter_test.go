@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	usererr "github.com/humansh/humansh/internal/errors"
-	"github.com/humansh/humansh/internal/llm"
-	"github.com/humansh/humansh/internal/llm/contracttest"
-	"github.com/humansh/humansh/internal/shell/protocol"
+	usererr "github.com/agenticlab-ai/humansh/internal/errors"
+	"github.com/agenticlab-ai/humansh/internal/llm"
+	"github.com/agenticlab-ai/humansh/internal/llm/contracttest"
+	"github.com/agenticlab-ai/humansh/internal/shell/protocol"
 )
 
 func TestRequestShapeAndWireSchema(t *testing.T) {

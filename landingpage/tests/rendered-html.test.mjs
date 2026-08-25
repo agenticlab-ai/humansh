@@ -49,6 +49,6 @@ test("redirects the branded install URL to the canonical installer", async () =>
   assert.equal(response.status, 307);
   assert.equal(
     response.headers.get("location"),
-    "https://raw.githubusercontent.com/mdarabi/humansh/main/scripts/install.sh",
+    "https://raw.githubusercontent.com/agenticlab-ai/humansh/main/scripts/install.sh",
   );
 });

@@ -1,5 +1,5 @@
 const upstreamInstallerUrl =
-  "https://raw.githubusercontent.com/mdarabi/humansh/main/scripts/install.sh";
+  "https://raw.githubusercontent.com/agenticlab-ai/humansh/main/scripts/install.sh";
 
 function installerRedirect() {
   return new Response(null, {

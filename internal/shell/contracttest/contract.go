@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/humansh/humansh/internal/shell"
+	"github.com/agenticlab-ai/humansh/internal/shell"
 )
 
 func Run(t *testing.T, adapter shell.Adapter, expectedID shell.ID, expectedProtocol string, conditionalAccept bool) {

@@ -13,13 +13,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/humansh/humansh/internal/app"
-	"github.com/humansh/humansh/internal/bootstrap"
-	"github.com/humansh/humansh/internal/config"
-	usererr "github.com/humansh/humansh/internal/errors"
-	"github.com/humansh/humansh/internal/llm"
-	"github.com/humansh/humansh/internal/shell"
-	"github.com/humansh/humansh/internal/shell/protocol"
+	"github.com/agenticlab-ai/humansh/internal/app"
+	"github.com/agenticlab-ai/humansh/internal/bootstrap"
+	"github.com/agenticlab-ai/humansh/internal/config"
+	usererr "github.com/agenticlab-ai/humansh/internal/errors"
+	"github.com/agenticlab-ai/humansh/internal/llm"
+	"github.com/agenticlab-ai/humansh/internal/shell"
+	"github.com/agenticlab-ai/humansh/internal/shell/protocol"
 )
 
 func isolatedEnv(t *testing.T) string {

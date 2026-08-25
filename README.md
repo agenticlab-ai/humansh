@@ -4,10 +4,10 @@
 
 [**humansh.com**](https://humansh.com) · [Install](#install) · [Documentation](#documentation)
 
-[![CI](https://github.com/mdarabi/humansh/actions/workflows/ci.yml/badge.svg)](https://github.com/mdarabi/humansh/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/mdarabi/humansh)](https://github.com/mdarabi/humansh/releases/latest)
+[![CI](https://github.com/agenticlab-ai/humansh/actions/workflows/ci.yml/badge.svg)](https://github.com/agenticlab-ai/humansh/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/agenticlab-ai/humansh)](https://github.com/agenticlab-ai/humansh/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Go](https://img.shields.io/github/go-mod/go-version/mdarabi/humansh)](go.mod)
+[![Go](https://img.shields.io/github/go-mod/go-version/agenticlab-ai/humansh)](go.mod)
 
 ![Humansh turns a plain-English request into an editable shell command, then runs it only after the user reviews it and presses Enter again.](docs/assets/humansh-demo.gif)
 

@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/humansh/humansh/assets"
-	"github.com/humansh/humansh/internal/shell"
-	"github.com/humansh/humansh/internal/shell/protocol"
+	"github.com/agenticlab-ai/humansh/assets"
+	"github.com/agenticlab-ai/humansh/internal/shell"
+	"github.com/agenticlab-ai/humansh/internal/shell/protocol"
 )
 
 func TestConfigRoundTrip(t *testing.T) {
