@@ -41,7 +41,7 @@ The generated command lands in your editable command line. Nothing runs until yo
 - **Runs in your shell, not a wrapper.** Integration happens at the ZLE/Readline layer, so `cd`, `export`, aliases, functions, and job control behave normally. It is not a REPL, terminal emulator, or replacement shell.
 - **Stays quiet when you type real commands.** A local, deterministic classifier decides before any network call, so `git status` costs no latency and no quota.
 - **Refuses to guess.** Input that is genuinely ambiguous is left untouched and never sent to a provider.
-- **Uses the subscription you already pay for.** Codex, Claude Code, and Cursor CLI run under your existing login. Metered API billing is opt-in only, and there is no silent fallback to it.
+- **Uses the subscription you already pay for.** Codex, Claude Code, and Cursor CLI run under your existing login. Metered OpenRouter API billing is opt-in only, and there is no silent fallback to it.
 - **Sends very little.** Your request, shell, OS, architecture, a privacy-normalised directory label, and a fixed list of detected tools. Never shell history, environment variables, file contents, or your username.
 
 ## Requirements
@@ -57,7 +57,7 @@ Bash integration needs 4.3 or newer so humansh can safely capture and restore ex
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mdarabi/humansh/main/scripts/install.sh | bash
+curl -fsSL https://humansh.com/install | bash
 ```
 
 This downloads the installer, fetches the matching binary from the latest release, and verifies its SHA-256 checksum before installing to `~/.local/bin`. No `sudo`, and no third-party software is installed on your behalf.
