@@ -15,7 +15,7 @@ const trustHighlights = [
     index: "02",
     eyebrow: "No extra cloud service",
     title: "One provider request",
-    body: "An ordinary translation talks only to your chosen AI provider. No HumanSH telemetry or analytics.",
+    body: "An ordinary translation talks only to your chosen AI provider. The HumanSH CLI sends no telemetry or analytics.",
   },
   {
     index: "03",
@@ -48,8 +48,8 @@ const safetyFeatures = [
   },
   {
     number: "05",
-    title: "No tracking layer",
-    body: "HumanSH does not collect telemetry, create a cloud account, or add a separate analytics request.",
+    title: "No product tracking layer",
+    body: "The HumanSH CLI does not collect telemetry, create a cloud account, or add a separate analytics request.",
   },
   {
     number: "06",
@@ -117,7 +117,7 @@ export default function Home() {
             <a href="#privacy">Privacy</a>
             <a href="#install">Install</a>
           </nav>
-          <a className="headerGithub" href={githubUrl} target="_blank" rel="noreferrer">
+          <a className="headerGithub" href={githubUrl} target="_blank" rel="noreferrer" data-analytics-event="github_open" data-analytics-placement="header_repo">
             GitHub <Arrow />
           </a>
         </div>
@@ -138,7 +138,7 @@ export default function Home() {
                 <a className="button buttonPrimary" href="#install">
                   Install HumanSH <span aria-hidden="true">↓</span>
                 </a>
-                <a className="button buttonGhost" href={githubUrl} target="_blank" rel="noreferrer">
+                <a className="button buttonGhost" href={githubUrl} target="_blank" rel="noreferrer" data-analytics-event="github_open" data-analytics-placement="hero_repo">
                   View the source <Arrow />
                 </a>
               </div>
@@ -323,7 +323,7 @@ export default function Home() {
                 </article>
               ))}
             </div>
-            <a className="textLink lightLink" href={`${githubUrl}/blob/main/docs/security.md`} target="_blank" rel="noreferrer">
+            <a className="textLink lightLink" href={`${githubUrl}/blob/main/docs/security.md`} target="_blank" rel="noreferrer" data-analytics-event="github_open" data-analytics-placement="privacy_security">
               Read the complete security model <Arrow />
             </a>
           </div>
@@ -352,8 +352,8 @@ export default function Home() {
               <h2 id="install-title">Stay in flow the next time memory fails.</h2>
               <p>Install HumanSH, follow the guided setup, and describe your first command in plain English.</p>
               <div className="installLinks">
-                <a className="button buttonLight" href={`${githubUrl}#install`} target="_blank" rel="noreferrer">Installation guide <Arrow /></a>
-                <a className="textLink lightLink" href={githubUrl} target="_blank" rel="noreferrer">View on GitHub <Arrow /></a>
+                <a className="button buttonLight" href={`${githubUrl}#install`} target="_blank" rel="noreferrer" data-analytics-event="github_open" data-analytics-placement="install_guide">Installation guide <Arrow /></a>
+                <a className="textLink lightLink" href={githubUrl} target="_blank" rel="noreferrer" data-analytics-event="github_open" data-analytics-placement="install_repo">View on GitHub <Arrow /></a>
               </div>
             </div>
             <div className="installTerminal">
@@ -390,12 +390,12 @@ export default function Home() {
         <div className="container footerTop">
           <div><Brand /><p>Plain English in. Reviewable commands out.</p></div>
           <div className="footerLinks">
-            <a href={`${githubUrl}/blob/main/README.md`} target="_blank" rel="noreferrer">Docs <Arrow /></a>
-            <a href={`${githubUrl}/blob/main/docs/security.md`} target="_blank" rel="noreferrer">Security <Arrow /></a>
-            <a href={githubUrl} target="_blank" rel="noreferrer">GitHub <Arrow /></a>
+            <a href={`${githubUrl}/blob/main/README.md`} target="_blank" rel="noreferrer" data-analytics-event="github_open" data-analytics-placement="footer_docs">Docs <Arrow /></a>
+            <a href={`${githubUrl}/blob/main/docs/security.md`} target="_blank" rel="noreferrer" data-analytics-event="github_open" data-analytics-placement="footer_security">Security <Arrow /></a>
+            <a href={githubUrl} target="_blank" rel="noreferrer" data-analytics-event="github_open" data-analytics-placement="footer_repo">GitHub <Arrow /></a>
           </div>
         </div>
-        <div className="container footerBottom"><span>© 2026 HumanSH</span><span>MIT licensed · Built in the open</span></div>
+        <div className="container footerBottom"><span>© 2026 HumanSH</span><span>MIT licensed · Website counts aggregate visits and selected actions without cookies or user IDs</span></div>
       </footer>
     </>
   );
