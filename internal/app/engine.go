@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/humansh/humansh/internal/classifier"
-	"github.com/humansh/humansh/internal/config"
-	usererr "github.com/humansh/humansh/internal/errors"
-	"github.com/humansh/humansh/internal/llm"
-	"github.com/humansh/humansh/internal/risk"
-	"github.com/humansh/humansh/internal/shell"
-	"github.com/humansh/humansh/internal/shell/protocol"
-	"github.com/humansh/humansh/internal/validate"
+	"github.com/agenticlab-ai/humansh/internal/classifier"
+	"github.com/agenticlab-ai/humansh/internal/config"
+	usererr "github.com/agenticlab-ai/humansh/internal/errors"
+	"github.com/agenticlab-ai/humansh/internal/llm"
+	"github.com/agenticlab-ai/humansh/internal/risk"
+	"github.com/agenticlab-ai/humansh/internal/shell"
+	"github.com/agenticlab-ai/humansh/internal/shell/protocol"
+	"github.com/agenticlab-ai/humansh/internal/validate"
 )
 
 type Classifier interface {

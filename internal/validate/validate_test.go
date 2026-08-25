@@ -5,8 +5,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	usererr "github.com/humansh/humansh/internal/errors"
-	"github.com/humansh/humansh/internal/llm"
+	usererr "github.com/agenticlab-ai/humansh/internal/errors"
+	"github.com/agenticlab-ai/humansh/internal/llm"
 )
 
 func TestExitMapping(t *testing.T) {

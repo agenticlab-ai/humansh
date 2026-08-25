@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/humansh/humansh/internal/config"
-	"github.com/humansh/humansh/internal/llm"
-	"github.com/humansh/humansh/internal/shell"
+	"github.com/agenticlab-ai/humansh/internal/config"
+	"github.com/agenticlab-ai/humansh/internal/llm"
+	"github.com/agenticlab-ai/humansh/internal/shell"
 	"golang.org/x/term"
 )
 

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/humansh/humansh/internal/config"
-	"github.com/humansh/humansh/internal/shell"
+	"github.com/agenticlab-ai/humansh/internal/config"
+	"github.com/agenticlab-ai/humansh/internal/shell"
 )
 
 type scoreBounds struct {

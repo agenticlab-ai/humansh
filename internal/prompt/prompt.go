@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/humansh/humansh/internal/llm"
+	"github.com/agenticlab-ai/humansh/internal/llm"
 )
 
 const Instruction = `You translate a user's natural-language intent into one command line for the target shell named in the supplied request object.

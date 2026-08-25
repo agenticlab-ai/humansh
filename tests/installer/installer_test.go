@@ -72,7 +72,7 @@ esac
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := "https://github.com/mdarabi/humansh/releases/latest/download/"
+	base := "https://github.com/agenticlab-ai/humansh/releases/latest/download/"
 	for _, want := range []string{base + asset, base + asset + ".sha256"} {
 		if !strings.Contains(string(requests), want) {
 			t.Errorf("release installer did not request %q:\n%s", want, requests)
