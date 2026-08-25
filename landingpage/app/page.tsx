@@ -1,3 +1,5 @@
+import { CopyInstallButton } from "./copy-install-button";
+
 const githubUrl = "https://github.com/mdarabi/humansh";
 const installCommand =
   "curl -fsSL https://humansh.com/install | bash";
@@ -355,7 +357,11 @@ export default function Home() {
               </div>
             </div>
             <div className="installTerminal">
-              <div className="installTerminalHead"><span className="windowDots" aria-hidden="true"><i /><i /><i /></span><span>Install HumanSH</span></div>
+              <div className="installTerminalHead">
+                <span className="windowDots" aria-hidden="true"><i /><i /><i /></span>
+                <span className="installTerminalTitle">Install HumanSH</span>
+                <CopyInstallButton command={installCommand} />
+              </div>
               <pre><code><span>$</span> {installCommand}</code></pre>
               <div className="installMeta"><span><i /> No sudo</span><span><i /> Checksum verified</span><span><i /> Guided setup</span></div>
             </div>
