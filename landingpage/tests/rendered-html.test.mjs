@@ -33,6 +33,7 @@ test("server-renders the HumanSH landing page", async () => {
   assert.match(html, /<title>HumanSH — Stay in your terminal<\/title>/i);
   assert.match(visibleHtml, /Forgot the command\? Stay in the terminal\./);
   assert.match(visibleHtml, /curl -fsSL https:\/\/humansh\.com\/install \| bash/);
+  assert.match(visibleHtml, /aria-label="Copy install command"/);
   assert.doesNotMatch(visibleHtml, /raw\.githubusercontent\.com/);
   assert.equal(visibleHtml.match(/\bfree\b/gi)?.length, 2);
 
