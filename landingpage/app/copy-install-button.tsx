@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { trackWebsiteEvent } from "./website-analytics";
 
 type CopyState = "idle" | "copied" | "error";
 
@@ -57,6 +58,7 @@ export function CopyInstallButton({ command }: { command: string }) {
     try {
       await copyToClipboard(command);
       setState("copied");
+      trackWebsiteEvent({ event: "install_copy", placement: "install" });
     } catch {
       setState("error");
     }

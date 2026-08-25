@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import { WebsiteAnalyticsListener } from "./website-analytics-listener";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -60,7 +61,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={inter.variable}>{children}</body>
+      <body className={inter.variable}>
+        {children}
+        <WebsiteAnalyticsListener />
+      </body>
     </html>
   );
 }

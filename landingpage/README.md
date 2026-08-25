@@ -41,6 +41,35 @@ To validate the complete Cloudflare package without publishing it:
 npm run deploy:cloudflare -- --dry-run
 ```
 
+## Website Analytics
+
+Cloudflare Web Analytics supplies aggregate page views. The Worker also writes
+these first-party actions to the `humansh_web_events` Analytics Engine dataset:
+
+- `install_copy`: the install command was copied successfully
+- `install_request`: the branded `/install` URL was requested with `GET`
+- `github_open`: a link to the HumanSH repository, docs, or security model was opened
+
+Each data point contains only the event, its placement on the page, the site
+hostname, and a count. It does not contain cookies, IP addresses, user IDs,
+referrers, user agents, or command text. The binding is included in the generated
+Wrangler configuration, and Cloudflare creates the dataset on its first deployed
+write.
+
+Example 30-day summary query:
+
+```sql
+SELECT
+  blob1 AS event,
+  blob2 AS placement,
+  SUM(_sample_interval * double1) AS total
+FROM humansh_web_events
+WHERE timestamp > NOW() - INTERVAL '30' DAY
+  AND blob3 = 'humansh.com'
+GROUP BY blob1, blob2
+ORDER BY total DESC
+```
+
 ## Cloudflare Deployment
 
 Authenticate Wrangler once:
