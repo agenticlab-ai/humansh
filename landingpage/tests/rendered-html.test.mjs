@@ -47,7 +47,7 @@ test("server-renders the HumanSH landing page", async () => {
   const headHtml = headMatch[1];
   const afterHeadHtml = html.slice((headMatch.index ?? 0) + headMatch[0].length);
 
-  assert.match(html, /<title>HumanSH — Stay in your terminal<\/title>/i);
+  assert.match(html, /<title>HumanSH — Plain English in your terminal<\/title>/i);
   assert.match(
     headHtml,
     /<link[^>]+rel="shortcut icon"[^>]+href="\/favicon\.ico\?v=2"[^>]*>/i,
@@ -64,8 +64,21 @@ test("server-renders the HumanSH landing page", async () => {
     afterHeadHtml,
     /<link[^>]+(?:favicon|apple-touch-icon)[^>]*>/i,
   );
-  assert.match(visibleHtml, /Forgot the command\? Stay in the terminal\./);
-  assert.match(visibleHtml, /curl -fsSL https:\/\/humansh\.com\/install \| bash/);
+  assert.match(
+    visibleHtml,
+    /Use plain English without changing how you work\./,
+  );
+  assert.match(
+    visibleHtml,
+    /HumanSH puts the command in your prompt for review/,
+  );
+  assert.match(visibleHtml, /Keep the terminal you know/);
+  assert.match(visibleHtml, /No separate API bill or extra monthly charge/);
+  assert.match(visibleHtml, /Your files stay on your computer/);
+  assert.match(visibleHtml, /Same terminal · 3 steps/);
+  assert.match(visibleHtml, /Do I need to switch terminal apps\?/);
+  assert.match(visibleHtml, /iTerm, Terminal\.app, VS Code(?:&#x27;|')s terminal/);
+  assert.match(visibleHtml, /curl -fsSL https:\/\/humansh\.com\/install \| sh/);
   assert.match(visibleHtml, /aria-label="Copy install command"/);
   assert.doesNotMatch(visibleHtml, /raw\.githubusercontent\.com/);
   assert.equal(visibleHtml.match(/\bfree\b/gi)?.length, 2);
