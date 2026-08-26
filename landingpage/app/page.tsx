@@ -7,9 +7,9 @@ const installCommand =
 const trustHighlights = [
   {
     index: "01",
-    eyebrow: "No new AI bill",
-    title: "Use what you already have",
-    body: "Connect a supported AI subscription you already pay for. A new paid API is not required.",
+    eyebrow: "No replacement terminal",
+    title: "Keep the setup you know",
+    body: "HumanSH works inside supported Zsh and Bash prompts in iTerm, Terminal.app, VS Code's terminal, and more.",
   },
   {
     index: "02",
@@ -59,6 +59,11 @@ const safetyFeatures = [
 ];
 
 const faqs = [
+  {
+    question: "Do I need to switch terminal apps?",
+    answer:
+      "No. HumanSH integrates with your shell prompt, so you can keep using iTerm, Terminal.app, VS Code's terminal, or another terminal you prefer. It currently supports Zsh and Bash 4.3+ on macOS and Linux.",
+  },
   {
     question: "Does HumanSH run generated commands automatically?",
     answer:
@@ -129,10 +134,10 @@ export default function Home() {
           <div className="heroGlow heroGlowBlue" aria-hidden="true" />
           <div className="container heroGrid">
             <div className="heroCopy">
-              <p className="eyebrow"><span /> Stay in your terminal</p>
-              <h1>Forgot the command? Stay in the terminal.</h1>
+              <p className="eyebrow"><span /> No replacement terminal</p>
+              <h1>Use plain English in the terminal you already know.</h1>
               <p className="heroLead">
-                Describe what you need. HumanSH writes the command directly into your terminal for review—no chatbot tab, no copy-paste, no lost flow.
+                HumanSH works inside the Zsh or Bash prompt you already use—in iTerm, Terminal.app, VS Code&apos;s terminal, and more. No replacement terminal or unfamiliar interface: describe, review, and run in place.
               </p>
               <div className="heroActions">
                 <a className="button buttonPrimary" href="#install">
@@ -231,11 +236,11 @@ export default function Home() {
               <article className="flowPanel newFlow">
                 <div className="flowPanelHead">
                   <span>With HumanSH</span>
-                  <strong>1 place · 3 steps</strong>
+                  <strong>Same terminal · 3 steps</strong>
                 </div>
                 <div className="flowVisual newFlowVisual">
                   <div className="miniWindow terminalWindow largeTerminalWindow">
-                    <div className="miniBar"><span>Terminal</span><span className="liveLabel"><i /> in flow</span></div>
+                    <div className="miniBar"><span>Your usual terminal</span><span className="liveLabel"><i /> in flow</span></div>
                     <div className="miniBody newFlowBody">
                       <p><span>%</span> show which process is using port 3000</p>
                       <p><span>%</span> lsof -nP -iTCP:3000 -sTCP:LISTEN<i /></p>
