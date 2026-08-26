@@ -20,9 +20,9 @@ export async function generateMetadata(): Promise<Metadata> {
     requestHeaders.get("x-forwarded-proto") ??
     (host.startsWith("localhost") ? "http" : "https");
   const origin = `${protocol}://${host}`;
-  const title = "HumanSH — Stay in your terminal";
+  const title = "HumanSH — Plain English in your terminal";
   const description =
-    "Describe the command you need in plain English. HumanSH writes it directly into your terminal for review—no chatbot tab, no copy-paste, no lost flow.";
+    "Use plain English without changing how you work. HumanSH works inside the terminal app you already use, with no new terminal interface to learn.";
 
   return {
     title,
@@ -30,9 +30,9 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase: new URL(origin),
     alternates: { canonical: origin },
     openGraph: {
-      title: "HumanSH — Forgot the command? Stay in the terminal.",
+      title: "HumanSH — Plain English in the terminal you already use.",
       description:
-        "Plain English in. Reviewable commands out. Nothing runs until you approve it.",
+        "Keep your terminal. Describe, review, and run commands in the interface you already know.",
       type: "website",
       url: origin,
       images: [
@@ -46,9 +46,9 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     twitter: {
       card: "summary_large_image",
-      title: "HumanSH — Forgot the command? Stay in the terminal.",
+      title: "HumanSH — Plain English in the terminal you already use.",
       description:
-        "Plain English in. Reviewable commands out. Nothing runs until you approve it.",
+        "Keep your terminal. Describe, review, and run commands in the interface you already know.",
       images: [`${origin}/og.png`],
     },
   };
