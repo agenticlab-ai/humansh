@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/agenticlab-ai/humansh/internal/app"
 	"github.com/agenticlab-ai/humansh/internal/bootstrap"
@@ -659,6 +660,7 @@ type setupTestProvider struct {
 	id              llm.ProviderID
 	diagnostic      llm.Diagnostic
 	probeDiagnostic *llm.Diagnostic
+	probeFunc       func(context.Context) llm.Diagnostic
 	probeCalls      int
 }
 
@@ -934,8 +936,13 @@ func (p *setupTestProvider) ID() llm.ProviderID { return p.id }
 func (p *setupTestProvider) Diagnose(context.Context) llm.Diagnostic {
 	return p.diagnostic
 }
-func (p *setupTestProvider) Probe(context.Context) llm.Diagnostic {
+func (p *setupTestProvider) Probe(ctx context.Context) llm.Diagnostic {
 	p.probeCalls++
+	if p.probeFunc != nil {
+		diagnostic := p.probeFunc(ctx)
+		diagnostic.LiveCheck = true
+		return diagnostic
+	}
 	diagnostic := p.diagnostic
 	if p.probeDiagnostic != nil {
 		diagnostic = *p.probeDiagnostic
@@ -1109,6 +1116,51 @@ func TestSetupUsesOneLiveProbeWithoutOpeningLogin(t *testing.T) {
 		if strings.Contains(strings.ToLower(out.String()+errOut.String()), unwanted) {
 			t.Fatalf("setup mentioned unsupported %q flow:\n%s%s", unwanted, out.String(), errOut.String())
 		}
+	}
+}
+
+func TestSetupCancellationStopsActiveProviderProbe(t *testing.T) {
+	started := make(chan struct{})
+	provider := &setupTestProvider{
+		id:         llm.Codex,
+		diagnostic: llm.Diagnostic{Installed: true, Configured: true, AuthMode: "provider_managed"},
+		probeFunc: func(ctx context.Context) llm.Diagnostic {
+			close(started)
+			<-ctx.Done()
+			return llm.Diagnostic{Installed: true, Configured: true, AuthMode: "provider_managed", Message: ctx.Err().Error()}
+		},
+	}
+	rt := bootstrap.Runtime{Engine: app.Engine{Providers: llm.MapRegistry{llm.Codex: provider}}, Config: config.Default()}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var out, errOut bytes.Buffer
+	type result struct {
+		selected llm.ProviderID
+		ok       bool
+		code     int
+	}
+	finished := make(chan result, 1)
+	go func() {
+		selected, ok, code := selectSetupProvider(ctx, rt, "codex", false, true, IO{In: strings.NewReader(""), Out: &out, Err: &errOut})
+		finished <- result{selected: selected, ok: ok, code: code}
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("provider probe did not start")
+	}
+	cancel()
+	select {
+	case got := <-finished:
+		if got.selected != llm.Codex || got.ok || got.code != 130 || provider.probeCalls != 1 {
+			t.Fatalf("selected=%s ok=%t code=%d probes=%d out=%s err=%s", got.selected, got.ok, got.code, provider.probeCalls, out.String(), errOut.String())
+		}
+		if combined := out.String() + errOut.String(); strings.Contains(combined, "is not ready") || strings.Contains(combined, "Live check failed") {
+			t.Fatalf("cancellation was reported as a provider failure:\n%s", combined)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("setup did not return after provider probe cancellation")
 	}
 }
 

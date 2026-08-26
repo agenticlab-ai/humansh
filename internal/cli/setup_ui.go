@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -29,6 +30,7 @@ const (
 type setupUI struct {
 	streams     IO
 	reader      *bufio.Reader
+	ctx         context.Context
 	interactive bool
 	styled      bool
 	animated    bool
@@ -39,10 +41,47 @@ func newSetupUI(streams IO, interactive bool) *setupUI {
 	return &setupUI{
 		streams:     streams,
 		reader:      bufio.NewReader(streams.In),
+		ctx:         context.Background(),
 		interactive: interactive,
 		styled:      interactive && animated && os.Getenv("NO_COLOR") == "",
 		animated:    animated,
 	}
+}
+
+type setupReadResult[T any] struct {
+	value T
+	err   error
+}
+
+func setupReadWithContext[T any](ctx context.Context, read func() (T, error)) (T, error) {
+	var zero T
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
+	result := make(chan setupReadResult[T], 1)
+	go func() {
+		value, err := read()
+		result <- setupReadResult[T]{value: value, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		return zero, ctx.Err()
+	case value := <-result:
+		return value.value, value.err
+	}
+}
+
+func (ui *setupUI) readString(delimiter byte) (string, error) {
+	return setupReadWithContext(ui.ctx, func() (string, error) {
+		return ui.reader.ReadString(delimiter)
+	})
+}
+
+func (ui *setupUI) readByte() (byte, error) {
+	return setupReadWithContext(ui.ctx, ui.reader.ReadByte)
 }
 
 func writerIsTerminal(writer io.Writer) bool {
@@ -253,7 +292,7 @@ func (ui *setupUI) providerRecovery(id llm.ProviderID, diagnostic llm.Diagnostic
 
 func (ui *setupUI) prompt(label, defaultValue string) (string, error) {
 	fmt.Fprintf(ui.streams.Out, "  %s %s: ", label, ui.paint(ansiDim, "["+defaultValue+"]"))
-	line, err := ui.reader.ReadString('\n')
+	line, err := ui.readString('\n')
 	if err != nil && len(line) == 0 {
 		return "", err
 	}
@@ -263,15 +302,13 @@ func (ui *setupUI) prompt(label, defaultValue string) (string, error) {
 func (ui *setupUI) promptSecret(label string) (string, error) {
 	fmt.Fprintf(ui.streams.Out, "  %s: ", label)
 	if file, ok := ui.streams.In.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
-		data, err := term.ReadPassword(int(file.Fd()))
-		fmt.Fprintln(ui.streams.Out)
-		return string(data), err
+		return ui.promptTerminalSecret(file)
 	}
 
 	const maxBytes = 16 << 10
 	value := make([]byte, 0, 64)
 	for {
-		next, err := ui.reader.ReadByte()
+		next, err := ui.readByte()
 		if err != nil {
 			if err == io.EOF {
 				return string(value), nil
@@ -291,6 +328,47 @@ func (ui *setupUI) promptSecret(label string) (string, error) {
 	}
 }
 
+func (ui *setupUI) promptTerminalSecret(file *os.File) (string, error) {
+	state, err := term.MakeRaw(int(file.Fd()))
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = term.Restore(int(file.Fd()), state) }()
+
+	const maxBytes = 16 << 10
+	value := make([]byte, 0, 64)
+	for {
+		next, err := ui.readByte()
+		if err != nil {
+			fmt.Fprint(ui.streams.Out, "\r\n")
+			return "", err
+		}
+		switch next {
+		case '\r', '\n':
+			fmt.Fprint(ui.streams.Out, "\r\n")
+			return string(value), nil
+		case 3:
+			fmt.Fprint(ui.streams.Out, "^C\r\n")
+			return "", context.Canceled
+		case 4:
+			if len(value) == 0 {
+				fmt.Fprint(ui.streams.Out, "^D\r\n")
+				return "", io.EOF
+			}
+		case 8, 127:
+			if len(value) > 0 {
+				value = value[:len(value)-1]
+			}
+		default:
+			if len(value) == maxBytes {
+				fmt.Fprint(ui.streams.Out, "\r\n")
+				return "", fmt.Errorf("secret input exceeds 16 KiB")
+			}
+			value = append(value, next)
+		}
+	}
+}
+
 func (ui *setupUI) promptBinding(label, defaultValue string) (string, error) {
 	file, ok := ui.streams.In.(*os.File)
 	if !ui.interactive || !ok || !term.IsTerminal(int(file.Fd())) {
@@ -307,7 +385,7 @@ func (ui *setupUI) promptBinding(label, defaultValue string) (string, error) {
 	var input []byte
 	var echoes []string
 	for {
-		key, err := ui.reader.ReadByte()
+		key, err := ui.readByte()
 		if err != nil {
 			fmt.Fprint(ui.streams.Out, "\r\n")
 			return "", err
@@ -318,7 +396,7 @@ func (ui *setupUI) promptBinding(label, defaultValue string) (string, error) {
 			return setupRawBindingInput(input)
 		case 3: // Ctrl-C cancels setup instead of becoming a shortcut accidentally.
 			fmt.Fprint(ui.streams.Out, "^C\r\n")
-			return "", io.EOF
+			return "", context.Canceled
 		case 4: // Ctrl-D on an empty field is the terminal's conventional EOF.
 			if len(input) == 0 {
 				fmt.Fprint(ui.streams.Out, "^D\r\n")

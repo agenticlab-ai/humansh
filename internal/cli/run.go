@@ -693,6 +693,7 @@ func runSetup(ctx context.Context, args []string, rt bootstrap.Runtime, streams 
 	}
 	interactive := readerIsTerminal(streams.In) && !*yes && !*repair
 	ui := newSetupUI(streams, interactive)
+	ui.ctx = ctx
 	ui.header()
 	ui.section(1, 6, "Shell compatibility")
 	ui.note("Humansh automatically configures every compatible Zsh or Bash installation it finds.")
@@ -725,6 +726,10 @@ func runSetup(ctx context.Context, args []string, rt bootstrap.Runtime, streams 
 			}
 		}
 	})
+	if ctx.Err() != nil {
+		printSetupCancellation(streams.Out, false)
+		return 130
+	}
 	var targetShells []shell.ID
 	for _, id := range candidates {
 		_, ok := rt.Engine.Shells.Get(id)
@@ -781,6 +786,10 @@ func runSetup(ctx context.Context, args []string, rt bootstrap.Runtime, streams 
 	var pendingOpenRouter *setupOpenRouterCredential
 	if !*repair {
 		selected, ok, code := configureSetupProvider(ctx, &rt, &cfg, *providerName, *yes, ui, &pendingOpenRouter)
+		if code == 130 || ctx.Err() != nil {
+			printSetupCancellation(streams.Out, pendingOpenRouter != nil)
+			return 130
+		}
 		if code != 0 {
 			return code
 		}
@@ -802,6 +811,10 @@ func runSetup(ctx context.Context, args []string, rt bootstrap.Runtime, streams 
 		ui.withLoader("Checking "+setupProviderName(cfg.Provider)+"…", func() {
 			diagnostic = provider.Probe(ctx)
 		})
+		if ctx.Err() != nil {
+			printSetupCancellation(streams.Out, false)
+			return 130
+		}
 		if !diagnostic.Available {
 			ui.providerProblem(cfg.Provider, diagnostic)
 			ui.providerRecovery(cfg.Provider, diagnostic)
@@ -883,6 +896,10 @@ func runSetup(ctx context.Context, args []string, rt bootstrap.Runtime, streams 
 			printSetupCancellation(streams.Out, pendingOpenRouter != nil)
 			return 130
 		}
+	}
+	if ctx.Err() != nil {
+		printSetupCancellation(streams.Out, pendingOpenRouter != nil)
+		return 130
 	}
 
 	applySetup := func() (setupErr error) {
@@ -1027,10 +1044,14 @@ func printSetupCancellation(out io.Writer, openRouterProbeRan bool) {
 
 func selectSetupProvider(ctx context.Context, rt bootstrap.Runtime, explicit string, yes, interactive bool, streams IO) (llm.ProviderID, bool, int) {
 	ui := newSetupUI(streams, interactive && !yes)
+	ui.ctx = ctx
 	var diagnostics map[llm.ProviderID]llm.Diagnostic
 	ui.withLoader("Checking AI providers…", func() {
 		diagnostics = diagnoseSetupProviders(ctx, rt)
 	})
+	if ctx.Err() != nil {
+		return "", false, 130
+	}
 	selected, ok, code := chooseSetupProvider(rt.Config.Provider, explicit, yes, ui, diagnostics)
 	if code != 0 || !ok {
 		return "", false, code
@@ -1044,6 +1065,9 @@ func configureSetupProvider(ctx context.Context, rt *bootstrap.Runtime, cfg *con
 	ui.withLoader("Checking AI providers…", func() {
 		diagnostics = diagnoseSetupProviders(ctx, *rt)
 	})
+	if ctx.Err() != nil {
+		return "", false, 130
+	}
 	current := cfg.Provider
 	for {
 		selected, ok, code := chooseSetupProvider(current, explicit, yes, ui, diagnostics)
@@ -1088,7 +1112,6 @@ func configureSetupProvider(ctx context.Context, rt *bootstrap.Runtime, cfg *con
 		if selected == llm.Claude {
 			changed, err := configureSetupClaudeExecutable(cfg, ui)
 			if err != nil {
-				fmt.Fprintln(ui.streams.Out, "\nSetup cancelled. Nothing was changed.")
 				return "", false, 130
 			}
 			if changed {
@@ -1102,12 +1125,14 @@ func configureSetupProvider(ctx context.Context, rt *bootstrap.Runtime, cfg *con
 				ui.withLoader("Rechecking Claude Code…", func() {
 					diagnostics[llm.Claude] = provider.Diagnose(ctx)
 				})
+				if ctx.Err() != nil {
+					return "", false, 130
+				}
 			}
 		}
 		if selected == llm.Cursor {
 			changed, err := configureSetupCursorExecutable(cfg, ui)
 			if err != nil {
-				fmt.Fprintln(ui.streams.Out, "\nSetup cancelled. Nothing was changed.")
 				return "", false, 130
 			}
 			if changed {
@@ -1121,6 +1146,9 @@ func configureSetupProvider(ctx context.Context, rt *bootstrap.Runtime, cfg *con
 				ui.withLoader("Rechecking Cursor CLI…", func() {
 					diagnostics[llm.Cursor] = provider.Diagnose(ctx)
 				})
+				if ctx.Err() != nil {
+					return "", false, 130
+				}
 			}
 		}
 
@@ -1221,6 +1249,9 @@ func configureSetupOpenRouter(ctx context.Context, rt bootstrap.Runtime, cfg *co
 			ui.withLoader("Checking the OpenRouter API key without using model credits…", func() {
 				keyErr = rt.ProviderSetup.ValidateOpenRouterKey(ctx, candidate, model, key)
 			})
+			if ctx.Err() != nil {
+				return false, nil, 130
+			}
 			if keyErr != nil {
 				ui.warning("OpenRouter key check failed: " + setupProviderErrorTitle(keyErr))
 				if os.Getenv("OPENROUTER_API_KEY") != "" {
@@ -1259,6 +1290,9 @@ func configureSetupOpenRouter(ctx context.Context, rt bootstrap.Runtime, cfg *co
 		ui.withLoader("Checking whether "+model+" supports strict structured output without using model credits…", func() {
 			modelErr = rt.ProviderSetup.ValidateOpenRouterModel(ctx, candidate, model, key)
 		})
+		if ctx.Err() != nil {
+			return false, nil, 130
+		}
 		if modelErr != nil {
 			ui.warning(setupProviderErrorTitle(modelErr))
 			if typed, ok := usererr.As(modelErr); ok && typed.Code == "openrouter_structured_output_unsupported" {
@@ -1273,6 +1307,9 @@ func configureSetupOpenRouter(ctx context.Context, rt bootstrap.Runtime, cfg *co
 		ui.withLoader("Running the required minimal compatibility check with "+model+" (one small metered request)…", func() {
 			_, probeErr = rt.ProviderSetup.ProbeOpenRouter(ctx, candidate, model, key)
 		})
+		if ctx.Err() != nil {
+			return false, nil, 130
+		}
 		if probeErr != nil {
 			ui.warning("That model did not pass the compatibility probe: " + setupProviderErrorTitle(probeErr))
 			ui.note("Next: paste another compatible provider/model ID below, or type back.")
@@ -1340,7 +1377,6 @@ func chooseSetupProvider(current llm.ProviderID, explicit string, yes bool, ui *
 	for {
 		answer, err := ui.prompt("AI provider", strconv.Itoa(defaultChoice))
 		if err != nil {
-			fmt.Fprintln(ui.streams.Err, "Provider selection cancelled; setup made no changes.")
 			return "", false, 130
 		}
 		if answer == "" {
@@ -1383,6 +1419,9 @@ func activateSetupProvider(ctx context.Context, rt bootstrap.Runtime, id llm.Pro
 		ui.withLoader("Checking "+setupProviderName(id)+" with its normal inference command…", func() {
 			diagnostic = provider.Probe(ctx)
 		})
+		if ctx.Err() != nil {
+			return false, diagnostic, 130
+		}
 	}
 	if diagnostic.Available {
 		ui.success("Using " + setupProviderName(id) + ".")

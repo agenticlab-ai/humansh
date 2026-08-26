@@ -60,7 +60,7 @@ Slow discovery and provider checks show an in-place loader on a terminal. Redire
 
 Before writing anything, setup shows shell modes, provider and model, directory-context privacy, timeout, and shortcuts. At a shortcut prompt, type a readable value such as `Ctrl-G`, `Ctrl-X Ctrl-T`, or `Esc t`.
 
-Setup preserves startup-file symlinks, applies all shell changes transactionally, can be cancelled without changes, and refuses to apply a stale reviewed patch.
+Setup preserves startup-file symlinks, applies all shell changes transactionally, and refuses to apply a stale reviewed patch. Pressing Ctrl-C at a prompt or during any shell, provider, key, or model check exits setup with status 130, restores normal terminal input, and leaves credentials, configuration, and shell files unchanged.
 
 ## Providers during setup
 
