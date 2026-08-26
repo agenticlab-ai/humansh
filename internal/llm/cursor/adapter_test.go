@@ -32,7 +32,7 @@ type fakeRunner struct {
 
 func clearCursorEnvironment(t *testing.T) {
 	t.Helper()
-	keys := append(append([]string{}, cursorOverrideEnvKeys...), cursorUserIdentityEnvKeys...)
+	keys := append([]string{}, cursorUserIdentityEnvKeys...)
 	keys = append(keys, cursorCredentialLocationEnvKeys...)
 	keys = append(keys, "AGENT_CLI_CREDENTIAL_STORE", "OSTYPE")
 	for _, key := range keys {
@@ -172,25 +172,6 @@ func TestCursorCredentialLocationsAndFileStoreAreNarrowlyForwarded(t *testing.T)
 		if strings.Contains(env, "GITHUB_TOKEN") || strings.Contains(env, "unrelated-secret") {
 			t.Errorf("call %d received unrelated secret", index)
 		}
-	}
-}
-
-func TestParentCursorOverridesAreNotForwarded(t *testing.T) {
-	for _, key := range cursorOverrideEnvKeys {
-		t.Run(key, func(t *testing.T) {
-			clearCursorEnvironment(t)
-			t.Setenv(key, "secret-or-endpoint")
-			runner := &fakeRunner{}
-			if _, err := (Adapter{Runner: runner}).Translate(context.Background(), llm.TranslationRequest{}); err != nil {
-				t.Fatal(err)
-			}
-			if len(runner.calls) != 1 {
-				t.Fatalf("model subprocess calls=%d", len(runner.calls))
-			}
-			if env := strings.Join(runner.calls[0].Env, "\n"); strings.Contains(env, key+"=") || strings.Contains(env, "secret-or-endpoint") {
-				t.Fatalf("override reached subprocess: %v", runner.calls[0].Env)
-			}
-		})
 	}
 }
 

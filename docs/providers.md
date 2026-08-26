@@ -4,7 +4,7 @@ The selected provider is explicit in `config.toml`. `humansh` never silently cha
 
 Codex, Claude Code, and Cursor own their authentication. This includes vendor installs, centrally managed corporate distributions, and wrappers that intentionally omit login/status commands. Humansh does not call or parse optional login, logout, auth-status, version, or help surfaces, and it does not infer billing mode from undocumented CLI output. A successful call proves that the selected CLI can currently reach its provider; account and billing policy remain the responsibility of that CLI distribution and its administrator or user.
 
-Known generic API-key and endpoint override variables are still excluded from the isolated child environment so unrelated parent-shell secrets cannot silently alter a call. Humansh never changes or logs out provider credentials.
+The shared child-environment allowlist excludes variables Humansh does not explicitly need, including generic API-key and endpoint overrides, so unrelated parent-shell secrets cannot silently alter a call. Provider adapters do not maintain or inspect auth-override key tables. Humansh never changes or logs out provider credentials.
 
 ## Readiness checks
 

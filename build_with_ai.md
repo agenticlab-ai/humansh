@@ -1331,7 +1331,7 @@ Codex, Claude Code, and Cursor distributions own their authentication and billin
 - Setup probes only the selected provider. `provider use` runs the same minimal probe before saving the selection. Neither flow starts a login process.
 - `provider test` and normal translation invoke the structured production path directly, with no auth/version/help/capability preflight. A distribution that rejects a mandatory production option must fail closed and return its safe bounded error; never retry with weaker controls.
 - Treat CLI diagnostics as `provider_managed`; do not label them as ChatGPT subscription, Claude subscription, Cursor account, API-key, or logged out based on undocumented output.
-- Continue to exclude known generic API-key, endpoint, authless, local, and cloud-selector overrides from the isolated child environment so unrelated parent-shell secrets cannot silently alter a call. Never alter the user's global environment or credentials.
+- Use the shared child-environment allowlist to exclude variables Humansh does not explicitly need, including generic API-key, endpoint, authless, local, and cloud-selector overrides. Do not maintain provider-specific auth-override detection tables or inspect those variables to decide readiness. Never alter the user's global environment or credentials.
 - `openrouter` remains the explicit directly configured metered API-key path and retains its key/model/schema validation flow.
 
 This contract supports centrally administered distributions while keeping Humansh's provider choice explicit. Billing policy for a CLI provider belongs to that distribution and its administrator or user; Humansh must not promise to identify it.

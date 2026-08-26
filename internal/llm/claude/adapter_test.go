@@ -36,7 +36,7 @@ type fakeRunner struct {
 
 func clearClaudeEnvironment(t *testing.T) {
 	t.Helper()
-	for _, keys := range [][]string{claudeOverrideEnvKeys, claudeCredentialEnvKeys, claudeCredentialLocationEnvKeys, claudeUserIdentityEnvKeys} {
+	for _, keys := range [][]string{claudeProviderEnvKeys, claudeCredentialLocationEnvKeys, claudeUserIdentityEnvKeys} {
 		for _, key := range keys {
 			t.Setenv(key, "")
 		}
@@ -155,7 +155,7 @@ func TestAutomaticClaudeSelectionFindsNativeInstallBeforeShellPathRefresh(t *tes
 	}
 }
 
-func TestClaudeProviderOAuthEnvironmentIsForwardedWithoutDisclosure(t *testing.T) {
+func TestClaudeProviderEnvironmentIsForwardedWithoutInspectionOrDisclosure(t *testing.T) {
 	clearClaudeEnvironment(t)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-access-secret")
 	t.Setenv("CLAUDE_CODE_OAUTH_REFRESH_TOKEN", "test-oauth-refresh-secret")

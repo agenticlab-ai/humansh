@@ -37,16 +37,6 @@ type cursorEnvelope struct {
 	Result  string `json:"result"`
 }
 
-// Cursor's API-key and endpoint settings can redirect usage away from the
-// provider configuration selected by the Cursor distribution. They are not
-// inherited implicitly by the isolated Humansh child process.
-var cursorOverrideEnvKeys = []string{
-	"CURSOR_API_KEY", "CURSOR_AUTH_TOKEN", "CURSOR_API_ENDPOINT", "CURSOR_API_BASE_URL",
-	"CURSOR_ENABLE_AUTHLESS", "CURSOR_AGENT_CLI_AUTHLESS_MODE", "CURSOR_AGENT_CLI_LOCAL_MODE",
-	"CURSOR_ENABLE_BEDROCK", "CURSOR_ENABLE_LOCAL_BEDROCK", "CURSOR_BEDROCK_BASE_URL",
-	"CURSOR_LOCAL_AGENT_API_KEY", "CURSOR_LOCAL_AGENT_API_KEY_HELPER", "CURSOR_LOCAL_AGENT_BASE_URL",
-}
-
 var cursorUserIdentityEnvKeys = []string{"USER", "LOGNAME"}
 
 var cursorCredentialLocationEnvKeys = []string{"CURSOR_CONFIG_DIR", "CURSOR_DATA_DIR", "XDG_CONFIG_HOME"}

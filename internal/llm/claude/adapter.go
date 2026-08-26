@@ -42,15 +42,11 @@ type claudeEnvelope struct {
 // while allowing the documented structured-output workflow to complete.
 const claudeMaxTurns = "3"
 
-var claudeOverrideEnvKeys = []string{
-	"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
-	"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
-}
-
-// These are Claude provider credentials documented for SDK and automated
-// environments. They are forwarded only to Claude Code, never added to the
-// generic minimal environment shared by other providers.
-var claudeCredentialEnvKeys = []string{
+// MinimalEnv intentionally drops the ambient environment. Pass these
+// documented Claude-owned values through so the actual probe and translation
+// see the same provider route as a direct `claude -p` call. Humansh never
+// inspects their values to decide readiness; only the inference result does.
+var claudeProviderEnvKeys = []string{
 	"CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_REFRESH_TOKEN", "CLAUDE_CODE_OAUTH_SCOPES",
 }
 
@@ -295,8 +291,8 @@ func (a Adapter) discoverBinary() (string, bool) {
 }
 
 func claudeRuntimeEnv(tempDir string) []string {
-	extra := make(map[string]string, len(claudeCredentialEnvKeys)+len(claudeCredentialLocationEnvKeys)+len(claudeUserIdentityEnvKeys))
-	for _, key := range claudeCredentialEnvKeys {
+	extra := make(map[string]string, len(claudeProviderEnvKeys)+len(claudeCredentialLocationEnvKeys)+len(claudeUserIdentityEnvKeys))
+	for _, key := range claudeProviderEnvKeys {
 		if value := os.Getenv(key); value != "" {
 			extra[key] = value
 		}
