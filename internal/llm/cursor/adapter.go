@@ -81,8 +81,11 @@ func (a Adapter) Probe(ctx context.Context) llm.Diagnostic {
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, a.timeout())
 	defer cancel()
+	// Cursor applies workspace trust before it reaches the model, including for
+	// print mode. The probe directory is Humansh-created and empty, so explicitly
+	// trust only that disposable directory rather than probing user files.
 	result, runErr := a.runner().Run(probeCtx, processrunner.Spec{
-		Path: a.binary(), Args: []string{"-p", providerutil.ProbePrompt}, Dir: tempDir, Env: cursorRuntimeEnv(tempDir),
+		Path: a.binary(), Args: []string{"-p", providerutil.ProbePrompt, "--trust"}, Dir: tempDir, Env: cursorRuntimeEnv(tempDir),
 		MaxStdout: 64 << 10, MaxStderr: 64 << 10,
 	})
 	return providerutil.ProbeDiagnostic(base, llm.Cursor, a.timeout(), result, runErr)

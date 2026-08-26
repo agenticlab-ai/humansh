@@ -15,7 +15,7 @@ The shared child-environment allowlist excludes variables Humansh does not expli
 | `provider test` | One real structured translation | Verify the complete production argument/output contract. |
 | Normal translation | One real structured translation | No separate auth, version, help, or capability preflight. |
 
-The minimal CLI probes are `codex exec <constant-prompt>`, `claude -p <constant-prompt>`, and `cursor-agent -p <constant-prompt>`. Humansh gives Codex a private, empty Git worktree so its probe does not need an optional repository-check flag. Output must contain the fixed `HUMANSH_READY` marker. Each probe has the configured timeout and bounded output; a failure returns the provider's credential-redacted, control-cleaned, length-bounded stdout/stderr detail.
+The minimal CLI probes are `codex exec <constant-prompt>`, `claude -p <constant-prompt>`, and `cursor-agent -p <constant-prompt> --trust`. Humansh gives Codex a private, empty Git worktree so its probe does not need an optional repository-check flag. Cursor requires workspace trust before contacting the model, so Humansh acknowledges trust only for its own private empty probe directory. Output must equal the fixed `HUMANSH_READY` marker. Each probe has the configured timeout and bounded output; a failure returns the provider's credential-redacted, control-cleaned, length-bounded stdout/stderr detail.
 
 Interactive setup always asks which provider to use, with the saved choice shown only as the default. It probes only the selected CLI provider. Setup never starts a login flow. If the live check fails and the user declines another choice, setup exits nonzero before saving credentials, configuration, or shell files, allowing an invoking installer to roll back its binary replacement.
 
@@ -66,7 +66,7 @@ Use `humansh provider test claude` to check the complete structured invocation. 
 
 ## Cursor CLI
 
-Cursor readiness uses `cursor-agent -p <constant-prompt>` and treats authentication as provider-managed. Automatic executable selection prefers `cursor-agent` and falls back to the legacy-compatible `agent` name; it never invokes the `cursor` editor launcher. If separate installations are present, setup can pin one absolute path. To change it later:
+Cursor readiness uses `cursor-agent -p <constant-prompt> --trust` in a Humansh-created empty directory and treats authentication as provider-managed. The trust flag acknowledges only that disposable workspace; no user or project files are present. Automatic executable selection prefers `cursor-agent` and falls back to the legacy-compatible `agent` name; it never invokes the `cursor` editor launcher. If separate installations are present, setup can pin one absolute path. To change it later:
 
 ```sh
 humansh config set providers.cursor.binary /absolute/path/to/cursor-agent

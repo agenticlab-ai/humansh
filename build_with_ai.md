@@ -1327,7 +1327,7 @@ Codex, Claude Code, and Cursor distributions own their authentication and billin
 - Do not inspect private auth-record formats or force a vendor login method. A successful inference does not prove a particular billing mode.
 - `Diagnose` performs non-inference discovery. For CLI adapters it checks executable/configuration presence only; `provider list` and `doctor` therefore remain non-billable.
 - `Probe` sends one disclosed, Humansh-owned constant prompt through the provider's normal non-interactive inference command and requires the fixed `HUMANSH_READY` marker. It may consume a small amount of quota.
-- The minimal CLI probe surface is `codex exec <prompt>`, `claude -p <prompt>`, or `cursor-agent -p <prompt>`. Give Codex a private, empty Git worktree so the probe does not depend on an optional repository-check flag.
+- The minimal CLI probe surface is `codex exec <prompt>`, `claude -p <prompt>`, or `cursor-agent -p <prompt> --trust`. Give Codex a private, empty Git worktree so the probe does not depend on an optional repository-check flag. Cursor requires workspace trust before contacting the model; acknowledge it only for the Humansh-created empty probe directory.
 - Setup probes only the selected provider. `provider use` runs the same minimal probe before saving the selection. Neither flow starts a login process.
 - `provider test` and normal translation invoke the structured production path directly, with no auth/version/help/capability preflight. A distribution that rejects a mandatory production option must fail closed and return its safe bounded error; never retry with weaker controls.
 - Treat CLI diagnostics as `provider_managed`; do not label them as ChatGPT subscription, Claude subscription, Cursor account, API-key, or logged out based on undocumented output.
@@ -1549,7 +1549,7 @@ Requirements:
 Minimal live probe:
 
 ```text
-cursor-agent -p <constant-HUMANSH_READY-prompt>
+cursor-agent -p <constant-HUMANSH_READY-prompt> --trust
 ```
 
 Full compatibility check:
@@ -2326,7 +2326,7 @@ Implement and test at least these conditions:
 #### Cursor CLI
 
 - CLI missing.
-- Minimal `cursor-agent -p` inference probe failed or timed out, preserving safe provider detail.
+- Minimal `cursor-agent -p <constant-prompt> --trust` inference probe failed or timed out, preserving safe provider detail.
 - Provider-managed authentication failed.
 - Mandatory read-only/structured invocation option rejected.
 - Account/workspace denied.
@@ -2641,7 +2641,7 @@ Use a fake `cursor-agent` executable.
 Assert:
 
 - Automatic resolution prefers `cursor-agent`, falls back to `agent`, and never invokes the `cursor` editor launcher.
-- Diagnose executes no subprocess. Probe executes exactly `cursor-agent -p <constant-prompt>` and preserves safe provider errors.
+- Diagnose executes no subprocess. Probe executes exactly `cursor-agent -p <constant-prompt> --trust` in a Humansh-created empty directory and preserves safe provider errors.
 - Parent `CURSOR_API_KEY`, `CURSOR_AUTH_TOKEN`, `CURSOR_API_ENDPOINT`, and related overrides are not forwarded to the isolated child.
 - `--print --output-format json --mode ask --sandbox enabled --trust` is exact, the working directory is empty/private, and the full dynamic prompt/request is on stdin only.
 - Rejected read-only/sandbox/JSON/trust options fail the one production call and are never retried more weakly.
@@ -3301,7 +3301,7 @@ These are implementation constraints derived from the current official provider 
 - Production Claude translation uses `--safe-mode` plus disabled tools and session persistence rather than `--bare`.
 - Cursor scripted execution uses `cursor-agent --print --output-format json --mode ask --sandbox enabled --trust`; `agent` is a fallback executable name, while `cursor` is the editor launcher and must not be used.
 - Cursor's Ask mode is documented as read-only, but the CLI currently exposes neither a native no-tools flag nor JSON-schema output. Run it only in an empty disposable workspace, put the schema/request on stdin, parse only its final success envelope, and enforce the canonical schema locally. Do not overstate this as total tool removal.
-- Cursor readiness relies only on a minimal `cursor-agent -p` call. Inherited API-key, auth-token, endpoint, authless, local, and cloud overrides are excluded rather than classified.
+- Cursor readiness relies only on `cursor-agent -p <constant-prompt> --trust` in a Humansh-created empty directory. Inherited API-key, auth-token, endpoint, authless, local, and cloud overrides are excluded rather than classified.
 - OpenRouter uses Bearer authentication against its OpenAI-compatible chat-completions endpoint and supports a restricted JSON-schema structured-output subset. Its wire schema omits unsupported string-length keywords, which remain locally enforced.
 - OpenRouter configuration records a concrete model proven by the setup-time schema probe; `openrouter/auto` is not the runtime default.
 

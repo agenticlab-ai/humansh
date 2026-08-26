@@ -133,7 +133,7 @@ Full rules, weights, and the grammar lexicon: [docs/classification.md](docs/clas
 |---|---|---|
 | `codex` | Managed by the selected Codex CLI distribution | A successful `codex exec` live check. |
 | `claude` | Managed by the selected Claude Code distribution | A successful `claude -p` live check. |
-| `cursor` | Managed by the selected Cursor CLI distribution | A successful `cursor-agent -p` live check. |
+| `cursor` | Managed by the selected Cursor CLI distribution | A successful `cursor-agent -p … --trust` live check in a private empty directory. |
 | `openrouter` | **Metered API key** | A model proven against humansh's strict-output schema. |
 
 ```sh

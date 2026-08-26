@@ -20,14 +20,15 @@ import (
 )
 
 type fakeRunner struct {
-	calls       []processrunner.Spec
-	deadlines   []bool
-	deadlineAt  []time.Time
-	probeOutput string
-	probeStderr string
-	probeErr    error
-	output      string
-	modelErr    error
+	calls        []processrunner.Spec
+	deadlines    []bool
+	deadlineAt   []time.Time
+	probeOutput  string
+	probeStderr  string
+	probeErr     error
+	requireTrust bool
+	output       string
+	modelErr     error
 }
 
 func clearCursorEnvironment(t *testing.T) {
@@ -48,7 +49,10 @@ func (f *fakeRunner) Run(ctx context.Context, spec processrunner.Spec) (processr
 	if err := ctx.Err(); err != nil {
 		return processrunner.Result{}, err
 	}
-	if reflect.DeepEqual(spec.Args, []string{"-p", providerutil.ProbePrompt}) {
+	if len(spec.Args) >= 2 && reflect.DeepEqual(spec.Args[:2], []string{"-p", providerutil.ProbePrompt}) {
+		if f.requireTrust && !slices.Contains(spec.Args, "--trust") {
+			return processrunner.Result{Stderr: []byte("Workspace Trust Required: pass --trust for this directory")}, fmt.Errorf("exit status 1")
+		}
 		value := f.probeOutput
 		if value == "" {
 			value = providerutil.ProbeMarker
@@ -175,14 +179,14 @@ func TestCursorCredentialLocationsAndFileStoreAreNarrowlyForwarded(t *testing.T)
 	}
 }
 
-func TestMinimalProbeUsesOnlyPrintAndSurfacesProviderErrors(t *testing.T) {
+func TestMinimalProbeUsesPrintWithDisposableWorkspaceTrustAndSurfacesProviderErrors(t *testing.T) {
 	clearCursorEnvironment(t)
-	runner := &fakeRunner{}
+	runner := &fakeRunner{requireTrust: true}
 	diagnostic := (Adapter{Runner: runner}).Probe(context.Background())
 	if !diagnostic.LiveCheck || !diagnostic.Available || !diagnostic.Authenticated || diagnostic.AuthMode != "provider_managed" {
 		t.Fatalf("diagnostic=%+v", diagnostic)
 	}
-	if len(runner.calls) != 1 || !reflect.DeepEqual(runner.calls[0].Args, []string{"-p", providerutil.ProbePrompt}) {
+	if len(runner.calls) != 1 || !reflect.DeepEqual(runner.calls[0].Args, []string{"-p", providerutil.ProbePrompt, "--trust"}) {
 		t.Fatalf("probe argv=%+v", runner.calls)
 	}
 
