@@ -22,7 +22,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const origin = `${protocol}://${host}`;
   const title = "HumanSH — Plain English in your terminal";
   const description =
-    "Use plain English in the terminal you already know. HumanSH works inside your existing Zsh or Bash prompt—no replacement terminal or unfamiliar interface.";
+    "Use plain English without changing how you work. HumanSH works inside the terminal app you already use, with no new terminal interface to learn.";
 
   return {
     title,
@@ -32,7 +32,7 @@ export async function generateMetadata(): Promise<Metadata> {
     openGraph: {
       title: "HumanSH — Plain English in the terminal you already use.",
       description:
-        "No replacement terminal. Describe, review, and run commands in your existing prompt.",
+        "Keep your terminal. Describe, review, and run commands in the interface you already know.",
       type: "website",
       url: origin,
       images: [
@@ -48,7 +48,7 @@ export async function generateMetadata(): Promise<Metadata> {
       card: "summary_large_image",
       title: "HumanSH — Plain English in the terminal you already use.",
       description:
-        "No replacement terminal. Describe, review, and run commands in your existing prompt.",
+        "Keep your terminal. Describe, review, and run commands in the interface you already know.",
       images: [`${origin}/og.png`],
     },
   };

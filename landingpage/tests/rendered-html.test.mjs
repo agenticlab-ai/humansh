@@ -66,13 +66,13 @@ test("server-renders the HumanSH landing page", async () => {
   );
   assert.match(
     visibleHtml,
-    /Use plain English in the terminal you already know\./,
+    /Use plain English without changing how you work\./,
   );
-  assert.match(visibleHtml, /No replacement terminal/i);
+  assert.match(visibleHtml, /Keep the terminal you know/);
   assert.match(visibleHtml, /Same terminal · 3 steps/);
   assert.match(visibleHtml, /Do I need to switch terminal apps\?/);
   assert.match(visibleHtml, /iTerm, Terminal\.app, VS Code(?:&#x27;|')s terminal/);
-  assert.match(visibleHtml, /curl -fsSL https:\/\/humansh\.com\/install \| bash/);
+  assert.match(visibleHtml, /curl -fsSL https:\/\/humansh\.com\/install \| sh/);
   assert.match(visibleHtml, /aria-label="Copy install command"/);
   assert.doesNotMatch(visibleHtml, /raw\.githubusercontent\.com/);
   assert.equal(visibleHtml.match(/\bfree\b/gi)?.length, 2);

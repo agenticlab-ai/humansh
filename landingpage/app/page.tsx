@@ -2,14 +2,14 @@ import { CopyInstallButton } from "./copy-install-button";
 
 const githubUrl = "https://github.com/agenticlab-ai/humansh";
 const installCommand =
-  "curl -fsSL https://humansh.com/install | bash";
+  "curl -fsSL https://humansh.com/install | sh";
 
 const trustHighlights = [
   {
     index: "01",
-    eyebrow: "No replacement terminal",
+    eyebrow: "Use your current terminal",
     title: "Keep the setup you know",
-    body: "HumanSH works inside supported Zsh and Bash prompts in iTerm, Terminal.app, VS Code's terminal, and more.",
+    body: "HumanSH works inside iTerm, Terminal.app, VS Code's terminal, and more—without asking you to switch terminal apps.",
   },
   {
     index: "02",
@@ -62,7 +62,7 @@ const faqs = [
   {
     question: "Do I need to switch terminal apps?",
     answer:
-      "No. HumanSH integrates with your shell prompt, so you can keep using iTerm, Terminal.app, VS Code's terminal, or another terminal you prefer. It currently supports Zsh and Bash 4.3+ on macOS and Linux.",
+      "No. HumanSH works in iTerm, Terminal.app, VS Code's terminal, and many others, so you can keep the terminal interface and workflow you already know.",
   },
   {
     question: "Does HumanSH run generated commands automatically?",
@@ -134,10 +134,10 @@ export default function Home() {
           <div className="heroGlow heroGlowBlue" aria-hidden="true" />
           <div className="container heroGrid">
             <div className="heroCopy">
-              <p className="eyebrow"><span /> No replacement terminal</p>
-              <h1>Use plain English in the terminal you already know.</h1>
+              <p className="eyebrow"><span /> Keep the terminal you know</p>
+              <h1>Use plain English without changing how you work.</h1>
               <p className="heroLead">
-                HumanSH works inside the Zsh or Bash prompt you already use—in iTerm, Terminal.app, VS Code&apos;s terminal, and more. No replacement terminal or unfamiliar interface: describe, review, and run in place.
+                HumanSH works inside iTerm, Terminal.app, VS Code&apos;s terminal, and more. Keep the interface and workflow you already know—describe what you need, review the command in place, then run it when you&apos;re ready.
               </p>
               <div className="heroActions">
                 <a className="button buttonPrimary" href="#install">
