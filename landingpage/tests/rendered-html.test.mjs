@@ -68,6 +68,10 @@ test("server-renders the HumanSH landing page", async () => {
     visibleHtml,
     /Use plain English without changing how you work\./,
   );
+  assert.match(
+    visibleHtml,
+    /HumanSH puts the command in your prompt for review/,
+  );
   assert.match(visibleHtml, /Keep the terminal you know/);
   assert.match(visibleHtml, /Same terminal · 3 steps/);
   assert.match(visibleHtml, /Do I need to switch terminal apps\?/);

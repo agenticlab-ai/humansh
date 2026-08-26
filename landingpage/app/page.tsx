@@ -137,7 +137,7 @@ export default function Home() {
               <p className="eyebrow"><span /> Keep the terminal you know</p>
               <h1>Use plain English without changing how you work.</h1>
               <p className="heroLead">
-                HumanSH works inside iTerm, Terminal.app, VS Code&apos;s terminal, and more. Keep the interface and workflow you already know—describe what you need, review the command in place, then run it when you&apos;re ready.
+                Describe what you need. HumanSH puts the command in your prompt for review, and you run it when you&apos;re ready.
               </p>
               <div className="heroActions">
                 <a className="button buttonPrimary" href="#install">
