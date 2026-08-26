@@ -15,21 +15,19 @@ import (
 	"github.com/agenticlab-ai/humansh/internal/exitcode"
 	"github.com/agenticlab-ai/humansh/internal/llm"
 	"github.com/agenticlab-ai/humansh/internal/llm/contracttest"
+	"github.com/agenticlab-ai/humansh/internal/llm/providerutil"
 	"github.com/agenticlab-ai/humansh/internal/processrunner"
 )
 
 type fakeRunner struct {
-	calls      []processrunner.Spec
-	deadlines  []bool
-	deadlineAt []time.Time
-	version    string
-	help       string
-	status     string
-	output     string
-	versionErr error
-	helpErr    error
-	statusErr  error
-	modelErr   error
+	calls       []processrunner.Spec
+	deadlines   []bool
+	deadlineAt  []time.Time
+	probeOutput string
+	probeStderr string
+	probeErr    error
+	output      string
+	modelErr    error
 }
 
 func clearCursorEnvironment(t *testing.T) {
@@ -50,26 +48,12 @@ func (f *fakeRunner) Run(ctx context.Context, spec processrunner.Spec) (processr
 	if err := ctx.Err(); err != nil {
 		return processrunner.Result{}, err
 	}
-	if reflect.DeepEqual(spec.Args, []string{"--version"}) {
-		value := f.version
+	if reflect.DeepEqual(spec.Args, []string{"-p", providerutil.ProbePrompt}) {
+		value := f.probeOutput
 		if value == "" {
-			value = "2026.07.23-e383d2b\n"
+			value = providerutil.ProbeMarker
 		}
-		return processrunner.Result{Stdout: []byte(value)}, f.versionErr
-	}
-	if reflect.DeepEqual(spec.Args, []string{"--help"}) {
-		value := f.help
-		if value == "" {
-			value = strings.Join(requiredHelpOptions, " ")
-		}
-		return processrunner.Result{Stdout: []byte(value)}, f.helpErr
-	}
-	if reflect.DeepEqual(spec.Args, []string{"status", "--format", "json"}) {
-		value := f.status
-		if value == "" {
-			value = `{"authenticated":true,"email":"person@example.com"}`
-		}
-		return processrunner.Result{Stdout: []byte(value)}, f.statusErr
+		return processrunner.Result{Stdout: []byte(value), Stderr: []byte(f.probeStderr)}, f.probeErr
 	}
 	value := f.output
 	if value == "" {
@@ -85,7 +69,7 @@ func TestEveryCursorSubprocessIsTimedAndIsolated(t *testing.T) {
 	if _, err := adapter.Translate(context.Background(), llm.TranslationRequest{Input: "list files", Shell: "zsh"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.calls) != 4 || len(runner.deadlines) != 4 {
+	if len(runner.calls) != 1 || len(runner.deadlines) != 1 {
 		t.Fatalf("calls=%d deadlines=%d", len(runner.calls), len(runner.deadlines))
 	}
 	for index, call := range runner.calls {
@@ -98,12 +82,6 @@ func TestEveryCursorSubprocessIsTimedAndIsolated(t *testing.T) {
 		if !slices.Contains(call.Env, "TMPDIR="+call.Dir) {
 			t.Errorf("call %d TMPDIR does not match isolation directory: %v", index, call.Env)
 		}
-	}
-	if runner.calls[0].Dir != runner.calls[1].Dir || runner.calls[0].Dir != runner.calls[2].Dir || runner.calls[3].Dir == runner.calls[0].Dir {
-		t.Fatalf("diagnostic/model isolation directories are wrong")
-	}
-	if !runner.deadlineAt[3].After(runner.deadlineAt[2]) {
-		t.Fatalf("model deadline %v did not receive a fresh budget after diagnostics ending at %v", runner.deadlineAt[3], runner.deadlineAt[2])
 	}
 }
 
@@ -139,7 +117,7 @@ func TestSafeReadOnlyInvocation(t *testing.T) {
 	if response.Command != "ls" {
 		t.Fatalf("response=%+v", response)
 	}
-	call := runner.calls[3]
+	call := runner.calls[0]
 	want := []string{"--print", "--output-format", "json", "--mode", "ask", "--sandbox", "enabled", "--trust"}
 	if !reflect.DeepEqual(call.Args, want) {
 		t.Fatalf("Cursor argv drifted:\n got: %#v\nwant: %#v", call.Args, want)
@@ -161,29 +139,8 @@ func TestConfiguredModelIsPassedAsSeparateArgument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := runner.calls[3].Args; !reflect.DeepEqual(got[len(got)-2:], []string{"--model", "cursor-model"}) {
+	if got := runner.calls[0].Args; !reflect.DeepEqual(got[len(got)-2:], []string{"--model", "cursor-model"}) {
 		t.Fatalf("model args=%v", got)
-	}
-}
-
-func TestParseAuthFixtures(t *testing.T) {
-	tests := []struct{ name, value, want string }{
-		{"authenticated-bool", `{"authenticated":true,"email":"person@example.com"}`, "cursor.com"},
-		{"logged-in-bool", `{"loggedIn":true}`, "cursor.com"},
-		{"status", `{"status":"logged_in"}`, "cursor.com"},
-		{"installed-cli-status", `{"status":"authenticated","isAuthenticated":true,"hasAccessToken":true,"hasRefreshToken":true,"message":"Logged in"}`, "cursor.com"},
-		{"installed-cli-logged-out", `{"status":"unauthenticated","isAuthenticated":false,"hasAccessToken":false,"hasRefreshToken":false,"message":"Not logged in"}`, "logged_out"},
-		{"logged-out", `{"authenticated":false}`, "logged_out"},
-		{"api-wins", `{"authenticated":true,"authMethod":"api_key"}`, "api"},
-		{"malformed", `{`, "unknown"},
-		{"unknown", `{"email":"person@example.com"}`, "unknown"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := parseAuth([]byte(test.value)); got != test.want {
-				t.Fatalf("parseAuth(%s)=%q want %q", test.value, got, test.want)
-			}
-		})
 	}
 }
 
@@ -196,7 +153,7 @@ func TestCursorCredentialLocationsAndFileStoreAreNarrowlyForwarded(t *testing.T)
 	t.Setenv("OSTYPE", "darwin25.0")
 	t.Setenv("GITHUB_TOKEN", "unrelated-secret")
 	runner := &fakeRunner{}
-	diagnostic := (Adapter{Runner: runner}).Diagnose(context.Background())
+	diagnostic := (Adapter{Runner: runner}).Probe(context.Background())
 	if !diagnostic.Available {
 		t.Fatalf("diagnostic=%+v", diagnostic)
 	}
@@ -218,40 +175,40 @@ func TestCursorCredentialLocationsAndFileStoreAreNarrowlyForwarded(t *testing.T)
 	}
 }
 
-func TestParentCursorOverridesAreRejectedBeforeSubprocess(t *testing.T) {
+func TestParentCursorOverridesAreNotForwarded(t *testing.T) {
 	for _, key := range cursorOverrideEnvKeys {
 		t.Run(key, func(t *testing.T) {
 			clearCursorEnvironment(t)
 			t.Setenv(key, "secret-or-endpoint")
 			runner := &fakeRunner{}
-			_, err := (Adapter{Runner: runner}).Translate(context.Background(), llm.TranslationRequest{})
-			typed, ok := usererr.As(err)
-			if !ok || typed.ExitCode != exitcode.ProviderAuth || typed.Code != "cursor_auth_override" {
-				t.Fatalf("error=%#v", err)
+			if _, err := (Adapter{Runner: runner}).Translate(context.Background(), llm.TranslationRequest{}); err != nil {
+				t.Fatal(err)
 			}
-			if len(runner.calls) != 0 {
-				t.Fatalf("override reached subprocess: %d calls", len(runner.calls))
+			if len(runner.calls) != 1 {
+				t.Fatalf("model subprocess calls=%d", len(runner.calls))
+			}
+			if env := strings.Join(runner.calls[0].Env, "\n"); strings.Contains(env, key+"=") || strings.Contains(env, "secret-or-endpoint") {
+				t.Fatalf("override reached subprocess: %v", runner.calls[0].Env)
 			}
 		})
 	}
 }
 
-func TestMissingCapabilitiesFailClosedBeforeModelCall(t *testing.T) {
+func TestMinimalProbeUsesOnlyPrintAndSurfacesProviderErrors(t *testing.T) {
 	clearCursorEnvironment(t)
-	runner := &fakeRunner{help: "--print --output-format"}
-	diagnostic := (Adapter{Runner: runner}).Diagnose(context.Background())
-	if diagnostic.Available || len(diagnostic.Capabilities) != 0 || !diagnostic.Authenticated {
+	runner := &fakeRunner{}
+	diagnostic := (Adapter{Runner: runner}).Probe(context.Background())
+	if !diagnostic.LiveCheck || !diagnostic.Available || !diagnostic.Authenticated || diagnostic.AuthMode != "provider_managed" {
 		t.Fatalf("diagnostic=%+v", diagnostic)
 	}
-	_, err := (Adapter{Runner: runner}).Translate(context.Background(), llm.TranslationRequest{})
-	typed, ok := usererr.As(err)
-	if !ok || typed.Code != "cursor_capabilities" {
-		t.Fatalf("error=%#v", err)
+	if len(runner.calls) != 1 || !reflect.DeepEqual(runner.calls[0].Args, []string{"-p", providerutil.ProbePrompt}) {
+		t.Fatalf("probe argv=%+v", runner.calls)
 	}
-	for _, call := range runner.calls {
-		if !reflect.DeepEqual(call.Args, []string{"--version"}) && !reflect.DeepEqual(call.Args, []string{"--help"}) && !reflect.DeepEqual(call.Args, []string{"status", "--format", "json"}) {
-			t.Fatalf("model call made without safe capabilities: %v", call.Args)
-		}
+
+	runner = &fakeRunner{probeStderr: "Authentication is managed by your organization", probeErr: fmt.Errorf("exit status 1")}
+	diagnostic = (Adapter{Runner: runner}).Probe(context.Background())
+	if diagnostic.Available || !diagnostic.LiveCheck || !strings.Contains(diagnostic.Message, "Authentication is managed by your organization") {
+		t.Fatalf("failed diagnostic=%+v", diagnostic)
 	}
 }
 

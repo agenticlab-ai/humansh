@@ -33,16 +33,20 @@ func (p ProviderID) Label() string {
 }
 
 type Diagnostic struct {
-	Installed     bool               `json:"installed"`
-	Configured    bool               `json:"configured"`
-	Authenticated bool               `json:"authenticated"`
-	Available     bool               `json:"available"`
-	AuthMode      string             `json:"auth_mode"`
-	Executable    string             `json:"executable,omitempty"`
-	Version       string             `json:"version,omitempty"`
-	Capabilities  []string           `json:"capabilities,omitempty"`
-	Message       string             `json:"message,omitempty"`
-	NextSteps     []DiagnosticAction `json:"next_steps,omitempty"`
+	Installed     bool `json:"installed"`
+	Configured    bool `json:"configured"`
+	Authenticated bool `json:"authenticated"`
+	Available     bool `json:"available"`
+	// LiveCheck is true only when Humansh has sent a minimal prompt through the
+	// provider's normal inference command. Discovery-only diagnostics leave it
+	// false so list/doctor can remain non-billable and side-effect free.
+	LiveCheck    bool               `json:"live_check"`
+	AuthMode     string             `json:"auth_mode"`
+	Executable   string             `json:"executable,omitempty"`
+	Version      string             `json:"version,omitempty"`
+	Capabilities []string           `json:"capabilities,omitempty"`
+	Message      string             `json:"message,omitempty"`
+	NextSteps    []DiagnosticAction `json:"next_steps,omitempty"`
 }
 
 // DiagnosticAction is a copyable recovery step for an unavailable provider.
@@ -72,7 +76,13 @@ type TranslationResponse struct {
 
 type Provider interface {
 	ID() ProviderID
+	// Diagnose performs non-inference discovery. CLI adapters must not assume
+	// that optional login, status, version, or help commands exist.
 	Diagnose(ctx context.Context) Diagnostic
+	// Probe sends one constant, minimal inference prompt and reports whether the
+	// provider's normal route can currently reach an LLM. It may consume a
+	// small amount of provider quota, so callers must use it deliberately.
+	Probe(ctx context.Context) Diagnostic
 	Translate(ctx context.Context, req TranslationRequest) (TranslationResponse, error)
 }
 

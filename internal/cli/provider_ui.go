@@ -87,7 +87,7 @@ func printProviderList(out io.Writer, result providerListResult) {
 		ui.paint(ansiDim, "STATUS"),
 	)
 	for _, item := range result.Providers {
-		mark := "!"
+		mark := "?"
 		markStyle := ansiYellow
 		if item.Diagnostic.Available {
 			mark = "✓"
@@ -155,7 +155,7 @@ Commands:
   list [--json]               Show readiness and mark the current provider
   use <name>                  Verify and select a provider
   select <name>               Alias for use
-  configure <name> [options]  Set up a provider's login, key, or model
+  configure <name> [options]  Inspect CLI auth ownership or set an API key/model
   test [name]                 Run one real translation test
   help [command]              Show this guide or help for one command
 
@@ -192,7 +192,7 @@ Example:
 
 The provider is not selected unless its readiness check passes.`)
 	case "configure":
-		fmt.Fprintln(out, `Configure a provider's authentication or model.
+		fmt.Fprintln(out, `Inspect CLI authentication ownership or configure an API provider.
 
 Usage:
   humansh provider configure <codex|claude|cursor|openrouter> [options]
@@ -203,8 +203,9 @@ Examples:
   humansh provider configure cursor
   humansh provider configure openrouter --model anthropic/claude-sonnet-4.5
 
-Codex, Claude Code, and Cursor CLI use their account login. OpenRouter prompts for
-an API key and requires a concrete provider/model ID.`)
+Codex, Claude Code, and Cursor manage their own authentication. Humansh does not
+invoke or parse their login/status commands. OpenRouter prompts for an API key
+and requires a concrete provider/model ID.`)
 	case "test":
 		fmt.Fprintln(out, `Run one real translation and validate the provider response.
 

@@ -24,6 +24,9 @@ func (p *fakeProvider) ID() llm.ProviderID { return llm.Codex }
 func (p *fakeProvider) Diagnose(context.Context) llm.Diagnostic {
 	return llm.Diagnostic{Available: true}
 }
+func (p *fakeProvider) Probe(context.Context) llm.Diagnostic {
+	return llm.Diagnostic{Installed: true, Configured: true, Authenticated: true, Available: true, LiveCheck: true, AuthMode: "test"}
+}
 func (p *fakeProvider) Translate(_ context.Context, request llm.TranslationRequest) (llm.TranslationResponse, error) {
 	p.calls++
 	p.request = request
@@ -184,6 +187,9 @@ type replacementProvider struct {
 func (p *replacementProvider) ID() llm.ProviderID { return p.id }
 func (*replacementProvider) Diagnose(context.Context) llm.Diagnostic {
 	return llm.Diagnostic{Available: true}
+}
+func (*replacementProvider) Probe(context.Context) llm.Diagnostic {
+	return llm.Diagnostic{Installed: true, Configured: true, Authenticated: true, Available: true, LiveCheck: true, AuthMode: "test"}
 }
 func (p *replacementProvider) Translate(_ context.Context, request llm.TranslationRequest) (llm.TranslationResponse, error) {
 	p.calls++

@@ -760,22 +760,13 @@ func isolatedEnvironment(home string) []string {
 
 func readyCodexEnvironment(t *testing.T, home string, environment []string) []string {
 	t.Helper()
-	codexHome := filepath.Join(home, "codex")
-	if err := os.MkdirAll(codexHome, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"test-only"}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	binDir := filepath.Join(home, "ready-provider-bin")
 	if err := os.Mkdir(binDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	script := `#!/bin/sh
 case "${1-} ${2-}" in
-  "exec --version") echo "codex-cli-exec 0.149.0" ;;
-  "exec --help") echo "--ephemeral --skip-git-repo-check --sandbox --ignore-user-config --ignore-rules --strict-config --color --output-schema --output-last-message --cd" ;;
-  "login status") echo "Logged in using ChatGPT" ;;
+  "exec Reply with exactly HUMANSH_READY and nothing else. Do not use tools or inspect external state.") echo "HUMANSH_READY" ;;
   *) exit 2 ;;
 esac
 `

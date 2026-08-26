@@ -14,7 +14,6 @@ import (
 
 	"github.com/agenticlab-ai/humansh/assets"
 	usererr "github.com/agenticlab-ai/humansh/internal/errors"
-	"github.com/agenticlab-ai/humansh/internal/exitcode"
 	"github.com/agenticlab-ai/humansh/internal/llm"
 	"github.com/agenticlab-ai/humansh/internal/llm/providerutil"
 	"github.com/agenticlab-ai/humansh/internal/processrunner"
@@ -38,15 +37,9 @@ type cursorEnvelope struct {
 	Result  string `json:"result"`
 }
 
-var requiredHelpOptions = []string{"--print", "--output-format", "--mode", "--sandbox", "--trust"}
-
-var observedCapabilities = []string{
-	"ask-mode-read-only", "json-envelope", "sandbox-enabled", "empty-workspace", "local-schema-validation",
-}
-
 // Cursor's API-key and endpoint settings can redirect usage away from the
-// signed-in Cursor account. Humansh supports only the official browser login
-// so selecting Cursor never silently changes billing or destination.
+// provider configuration selected by the Cursor distribution. They are not
+// inherited implicitly by the isolated Humansh child process.
 var cursorOverrideEnvKeys = []string{
 	"CURSOR_API_KEY", "CURSOR_AUTH_TOKEN", "CURSOR_API_ENDPOINT", "CURSOR_API_BASE_URL",
 	"CURSOR_ENABLE_AUTHLESS", "CURSOR_AGENT_CLI_AUTHLESS_MODE", "CURSOR_AGENT_CLI_LOCAL_MODE",
@@ -60,116 +53,52 @@ var cursorCredentialLocationEnvKeys = []string{"CURSOR_CONFIG_DIR", "CURSOR_DATA
 
 func (Adapter) ID() llm.ProviderID { return llm.Cursor }
 
-func (a Adapter) Diagnose(ctx context.Context) llm.Diagnostic {
-	for _, key := range cursorOverrideEnvKeys {
-		if os.Getenv(key) != "" {
-			return llm.Diagnostic{Installed: true, Configured: true, AuthMode: "override", Message: key + " overrides Cursor browser-login authentication"}
-		}
-	}
-
-	diagnosticCtx, cancel := context.WithTimeout(ctx, a.timeout())
-	defer cancel()
-	tempDir, err := os.MkdirTemp("", "humansh-cursor-diagnose-*")
-	if err != nil {
-		return llm.Diagnostic{Message: "Cursor CLI diagnostic isolation could not be created"}
-	}
-	defer os.RemoveAll(tempDir)
-	if err := os.Chmod(tempDir, 0o700); err != nil {
-		return llm.Diagnostic{Message: "Cursor CLI diagnostic isolation could not be secured"}
-	}
-
-	binary, executable := a.diagnosticBinary()
-	command := cursorDiagnosticCommand(executable)
-	env := cursorRuntimeEnv(tempDir)
-	runner := a.runner()
-	version, versionErr := runner.Run(diagnosticCtx, processrunner.Spec{Path: binary, Args: []string{"--version"}, Dir: tempDir, Env: env, MaxStdout: 4096, MaxStderr: 4096})
-	if processrunner.IsNotFound(versionErr) {
+func (a Adapter) Diagnose(context.Context) llm.Diagnostic {
+	executable, found := a.discoverBinary()
+	if !found {
+		diagnostic := llm.Diagnostic{Configured: a.Config.Binary != "", AuthMode: "provider_managed", Message: "Cursor CLI is not installed"}
 		if a.Config.Binary != "" {
-			return llm.Diagnostic{
-				Configured: true, Executable: a.Config.Binary,
-				Message: fmt.Sprintf("selected Cursor CLI executable %q was not found", a.Config.Binary),
-				NextSteps: []llm.DiagnosticAction{
-					{Description: "Restore automatic Cursor executable selection", Command: "humansh config set providers.cursor.binary auto"},
-					{Description: "Choose and recheck Cursor CLI", Command: "humansh setup"},
-				},
+			diagnostic.Executable = a.Config.Binary
+			diagnostic.Message = fmt.Sprintf("selected Cursor CLI executable %q was not found", a.Config.Binary)
+			diagnostic.NextSteps = []llm.DiagnosticAction{
+				{Description: "Restore automatic Cursor executable selection", Command: "humansh config set providers.cursor.binary auto"},
+				{Description: "Choose and recheck Cursor CLI", Command: "humansh setup"},
 			}
+		} else {
+			diagnostic.NextSteps = []llm.DiagnosticAction{{Description: "Install Cursor CLI", Command: "curl https://cursor.com/install -fsS | bash"}}
 		}
-		return llm.Diagnostic{Message: "Cursor CLI is not installed", NextSteps: []llm.DiagnosticAction{{Description: "Install Cursor CLI", Command: "curl https://cursor.com/install -fsS | bash"}}}
-	}
-	reportedVersion := strings.TrimSpace(string(version.Stdout))
-	if reportedVersion == "" {
-		reportedVersion = strings.TrimSpace(string(version.Stderr))
-	}
-	help, helpErr := runner.Run(diagnosticCtx, processrunner.Spec{Path: binary, Args: []string{"--help"}, Dir: tempDir, Env: env, MaxStdout: 64 << 10, MaxStderr: 64 << 10})
-	capabilitiesOK := versionErr == nil && helpErr == nil && containsAll(string(help.Stdout)+"\n"+string(help.Stderr), requiredHelpOptions)
-	status, statusErr := runner.Run(diagnosticCtx, processrunner.Spec{Path: binary, Args: []string{"status", "--format", "json"}, Dir: tempDir, Env: env, MaxStdout: 64 << 10, MaxStderr: 64 << 10})
-	auth := parseAuth(status.Stdout)
-	authenticated := statusErr == nil && auth == "cursor.com"
-
-	var problems []string
-	var nextSteps []llm.DiagnosticAction
-	if !capabilitiesOK {
-		problems = append(problems, "required read-only non-interactive capabilities are missing")
-		nextSteps = append(nextSteps, llm.DiagnosticAction{Description: "Update this exact Cursor CLI executable", Command: command + " update"})
-	}
-	if !authenticated {
-		switch auth {
-		case "logged_out":
-			problems = append(problems, "fresh Cursor CLI processes report logged out")
-			nextSteps = append(nextSteps, llm.DiagnosticAction{Description: "Sign in this exact Cursor CLI executable in your browser", Command: command + " login"})
-		case "api":
-			problems = append(problems, "API-key authentication is active instead of a Cursor browser login")
-			nextSteps = append(nextSteps, llm.DiagnosticAction{Description: "Remove the API-key authentication and sign in through Cursor", Command: command + " login"})
-		default:
-			if statusErr != nil {
-				problems = append(problems, "Cursor authentication status check failed")
-			} else {
-				problems = append(problems, "Cursor browser-login authentication could not be confirmed")
-			}
-			nextSteps = append(nextSteps, llm.DiagnosticAction{Description: "Check this exact Cursor CLI executable's login", Command: command + " status"})
-		}
-	}
-	message := strings.Join(problems, "; ")
-	if authenticated && capabilitiesOK {
-		message = "Cursor browser login and qualified read-only capabilities confirmed"
-	}
-	if len(nextSteps) > 0 {
-		nextSteps = append(nextSteps, llm.DiagnosticAction{Description: "Recheck Cursor CLI in humansh", Command: "humansh setup"})
-	}
-	capabilities := []string(nil)
-	if capabilitiesOK {
-		capabilities = append(capabilities, observedCapabilities...)
+		return diagnostic
 	}
 	return llm.Diagnostic{
-		Installed: true, Configured: true, Authenticated: authenticated, Available: authenticated && capabilitiesOK,
-		AuthMode: auth, Executable: executable, Version: reportedVersion, Capabilities: capabilities, Message: message, NextSteps: nextSteps,
+		Installed: true, Configured: true, AuthMode: "provider_managed", Executable: executable,
+		Message:   "Cursor CLI is installed; live inference has not been checked",
+		NextSteps: []llm.DiagnosticAction{{Description: "Run a live provider check", Command: "humansh provider test cursor"}},
 	}
 }
 
-func (a Adapter) Translate(ctx context.Context, request llm.TranslationRequest) (llm.TranslationResponse, error) {
-	// Readiness checks and the model request each receive a full timeout budget.
-	// Sharing one deadline here made the three diagnostic subprocesses consume
-	// part of the time configured for the actual translation.
-	diagnostic := a.Diagnose(ctx)
-	if !diagnostic.Available {
-		switch {
-		case !diagnostic.Installed:
-			return llm.TranslationResponse{}, providerutil.Missing("Cursor CLI", "curl https://cursor.com/install -fsS | bash", "cursor-agent login")
-		case diagnostic.AuthMode == "override":
-			return llm.TranslationResponse{}, usererr.WithExit(exitcode.ProviderAuth, "cursor_auth_override", diagnostic.Message+".", "Nothing was changed or executed.", false, nil,
-				usererr.Fix{Description: "Unset the reported Cursor API, endpoint, authless, local, or Bedrock override, then retry", Command: "humansh doctor --provider cursor"})
-		case len(diagnostic.Capabilities) == 0:
-			return llm.TranslationResponse{}, usererr.WithExit(exitcode.ProviderUnavailable, "cursor_capabilities", "Cursor CLI is not qualified for read-only structured translation.", "Nothing was changed or executed.", false, nil,
-				usererr.Fix{Description: "Update Cursor CLI, then check", Command: "cursor-agent update && humansh doctor --provider cursor"})
-		case diagnostic.AuthMode == "api":
-			return llm.TranslationResponse{}, usererr.WithExit(exitcode.ProviderAuth, "cursor_metered_auth", "Cursor CLI is using API-key authentication instead of a Cursor browser login.", "Nothing was changed or executed.", false, nil,
-				usererr.Fix{Description: "Sign in through Cursor", Command: "cursor-agent login"}, usererr.Fix{Description: "Check", Command: "cursor-agent status"})
-		default:
-			return llm.TranslationResponse{}, usererr.WithExit(exitcode.ProviderAuth, "provider_auth", "Cursor CLI is not logged in through the required Cursor browser account.", "Nothing was changed or executed.", false, nil,
-				usererr.Fix{Description: "Fix", Command: "cursor-agent login"}, usererr.Fix{Description: "Check", Command: "cursor-agent status"})
-		}
+func (a Adapter) Probe(ctx context.Context) llm.Diagnostic {
+	base := a.Diagnose(ctx)
+	if !base.Installed && a.Runner == nil {
+		return base
 	}
+	tempDir, err := os.MkdirTemp("", "humansh-cursor-probe-*")
+	if err != nil {
+		return providerutil.DiagnosticFromError(base, providerutil.Temporary("Cursor CLI", err))
+	}
+	defer os.RemoveAll(tempDir)
+	if err := os.Chmod(tempDir, 0o700); err != nil {
+		return providerutil.DiagnosticFromError(base, providerutil.Temporary("Cursor CLI", err))
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, a.timeout())
+	defer cancel()
+	result, runErr := a.runner().Run(probeCtx, processrunner.Spec{
+		Path: a.binary(), Args: []string{"-p", providerutil.ProbePrompt}, Dir: tempDir, Env: cursorRuntimeEnv(tempDir),
+		MaxStdout: 64 << 10, MaxStderr: 64 << 10,
+	})
+	return providerutil.ProbeDiagnostic(base, llm.Cursor, a.timeout(), result, runErr)
+}
 
+func (a Adapter) Translate(ctx context.Context, request llm.TranslationRequest) (llm.TranslationResponse, error) {
 	tempDir, err := os.MkdirTemp("", "humansh-cursor-*")
 	if err != nil {
 		return llm.TranslationResponse{}, providerutil.Temporary("Cursor CLI", err)
@@ -191,7 +120,7 @@ func (a Adapter) Translate(ctx context.Context, request llm.TranslationRequest) 
 	result, runErr := a.runner().Run(callCtx, processrunner.Spec{Path: a.binary(), Args: args, Stdin: wirePrompt, Dir: tempDir, Env: cursorRuntimeEnv(tempDir), MaxStdout: 1 << 20, MaxStderr: 1 << 20})
 	if runErr != nil {
 		if processrunner.IsNotFound(runErr) {
-			return llm.TranslationResponse{}, providerutil.Missing("Cursor CLI", "curl https://cursor.com/install -fsS | bash", "cursor-agent login")
+			return llm.TranslationResponse{}, providerutil.Missing("Cursor CLI", "curl https://cursor.com/install -fsS | bash", "")
 		}
 		if processrunner.IsOutputLimit(runErr) {
 			return llm.TranslationResponse{}, providerutil.Malformed("Cursor CLI output exceeded the capture limit", runErr)
@@ -232,57 +161,6 @@ func cursorPrompt(request llm.TranslationRequest) ([]byte, error) {
 	value.Write(requestJSON)
 	value.WriteString("\nREQUEST_JSON_END\n")
 	return value.Bytes(), nil
-}
-
-func parseAuth(data []byte) string {
-	var value any
-	if json.Unmarshal(data, &value) != nil {
-		return "unknown"
-	}
-	var authenticated, loggedOut, api bool
-	var walk func(string, any)
-	walk = func(key string, item any) {
-		switch typed := item.(type) {
-		case map[string]any:
-			for childKey, child := range typed {
-				walk(strings.ToLower(strings.ReplaceAll(childKey, "_", "")), child)
-			}
-		case []any:
-			for _, child := range typed {
-				walk(key, child)
-			}
-		case bool:
-			if key == "authenticated" || key == "loggedin" {
-				if typed {
-					authenticated = true
-				} else {
-					loggedOut = true
-				}
-			}
-		case string:
-			text := strings.ToLower(strings.TrimSpace(typed))
-			if text == "api" || text == "api-key" || text == "api_key" || text == "apikey" || strings.Contains(text, "api key") {
-				api = true
-			}
-			if (key == "status" || key == "authstatus") && (text == "authenticated" || text == "loggedin" || text == "logged-in" || text == "logged_in") {
-				authenticated = true
-			}
-			if (key == "status" || key == "authstatus") && (text == "unauthenticated" || text == "loggedout" || text == "logged-out" || text == "logged_out") {
-				loggedOut = true
-			}
-		}
-	}
-	walk("", value)
-	if api {
-		return "api"
-	}
-	if authenticated {
-		return "cursor.com"
-	}
-	if loggedOut {
-		return "logged_out"
-	}
-	return "unknown"
 }
 
 func (a Adapter) mapCLIError(result processrunner.Result, runErr error) error {
@@ -349,29 +227,27 @@ func absoluteLookPath(name string) (string, error) {
 	return filepath.Abs(resolved)
 }
 
-func (a Adapter) diagnosticBinary() (command, executable string) {
-	command = a.binary()
+func (a Adapter) discoverBinary() (string, bool) {
 	if a.Runner != nil {
-		return command, ""
+		return "", true
 	}
+	command := a.binary()
 	if filepath.IsAbs(command) {
-		return command, command
+		info, err := os.Stat(command)
+		return command, err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
 	}
 	resolved, err := exec.LookPath(command)
 	if err != nil {
-		return command, ""
+		return "", false
 	}
-	return resolved, resolved
-}
-
-func cursorDiagnosticCommand(executable string) string {
-	if executable == "" {
-		return "cursor-agent"
+	if filepath.IsAbs(resolved) {
+		return resolved, true
 	}
-	if !strings.ContainsAny(executable, " \t\n'\"\\$`;&|<>()[]{}*?!#~") {
-		return executable
+	absolute, err := filepath.Abs(resolved)
+	if err != nil {
+		return resolved, true
 	}
-	return "'" + strings.ReplaceAll(executable, "'", `'"'"'`) + "'"
+	return absolute, true
 }
 
 func cursorRuntimeEnv(tempDir string) []string {
@@ -400,13 +276,4 @@ func (a Adapter) timeout() time.Duration {
 		return a.Config.Timeout
 	}
 	return 20 * time.Second
-}
-
-func containsAll(value string, required []string) bool {
-	for _, item := range required {
-		if !strings.Contains(value, item) {
-			return false
-		}
-	}
-	return true
 }

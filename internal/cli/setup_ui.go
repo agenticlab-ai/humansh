@@ -204,6 +204,9 @@ func (ui *setupUI) providerDiagnostic(id llm.ProviderID, diagnostic llm.Diagnost
 
 func (ui *setupUI) providerProblem(id llm.ProviderID, diagnostic llm.Diagnostic) {
 	ui.warning(setupProviderName(id) + ": " + setupProviderChoiceStatus(id, diagnostic) + ".")
+	if diagnostic.Message != "" {
+		ui.note(diagnostic.Message)
+	}
 	if diagnostic.Executable != "" {
 		selected := "Executable " + strconv.Quote(diagnostic.Executable)
 		if diagnostic.Version != "" {
@@ -219,14 +222,22 @@ func (ui *setupUI) providerRecovery(id llm.ProviderID, diagnostic llm.Diagnostic
 		switch id {
 		case llm.Codex:
 			if diagnostic.Installed {
-				actions = []llm.DiagnosticAction{{Description: "Sign in with ChatGPT", Command: "codex login"}, {Description: "Rerun setup", Command: "humansh setup"}}
+				actions = []llm.DiagnosticAction{{Description: "Check the provider-managed Codex setup", Command: "humansh provider test codex"}, {Description: "Rerun setup", Command: "humansh setup"}}
 			} else {
 				actions = []llm.DiagnosticAction{{Description: "Install Codex", Command: "curl -fsSL https://chatgpt.com/codex/install.sh | sh"}, {Description: "Rerun setup", Command: "humansh setup"}}
 			}
 		case llm.Claude:
-			actions = []llm.DiagnosticAction{{Description: "Sign in to Claude Code", Command: "claude auth login --claudeai"}, {Description: "Rerun setup", Command: "humansh setup"}}
+			if diagnostic.Installed {
+				actions = []llm.DiagnosticAction{{Description: "Check the provider-managed Claude Code setup", Command: "humansh provider test claude"}, {Description: "Rerun setup", Command: "humansh setup"}}
+			} else {
+				actions = []llm.DiagnosticAction{{Description: "Install Claude Code", Command: "curl -fsSL https://claude.ai/install.sh | bash"}, {Description: "Rerun setup", Command: "humansh setup"}}
+			}
 		case llm.Cursor:
-			actions = []llm.DiagnosticAction{{Description: "Sign in to Cursor CLI", Command: "cursor-agent login"}, {Description: "Rerun setup", Command: "humansh setup"}}
+			if diagnostic.Installed {
+				actions = []llm.DiagnosticAction{{Description: "Check the provider-managed Cursor setup", Command: "humansh provider test cursor"}, {Description: "Rerun setup", Command: "humansh setup"}}
+			} else {
+				actions = []llm.DiagnosticAction{{Description: "Install Cursor CLI", Command: "curl https://cursor.com/install -fsS | bash"}, {Description: "Rerun setup", Command: "humansh setup"}}
+			}
 		case llm.OpenRouter:
 			actions = []llm.DiagnosticAction{{Description: "Configure OpenRouter", Command: "humansh provider configure openrouter --model provider/model"}, {Description: "Rerun setup", Command: "humansh setup"}}
 		}

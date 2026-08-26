@@ -37,37 +37,23 @@ When a valid manually formatted `config.toml` or `classifier.toml` must be rewri
 ## Codex
 
 ```sh
-codex login
-codex login status
 humansh provider test codex
 ```
 
-Choose “Sign in with ChatGPT.” API-key login is usage-based and is not accepted by the `codex` subscription adapter. If safe structured-output or mandatory tool-disable config is unavailable, update Codex rather than weakening isolation.
-
-For a corroborated ChatGPT auth record with newly unrecognized status wording:
-
-```sh
-humansh provider configure codex
-humansh provider configure codex --confirm-subscription-auth
-```
+Humansh uses `codex exec` and lets the selected Codex distribution manage authentication. It does not inspect login status or the local auth record. If the CLI rejects a mandatory structured-output or tool-disable setting, the full test shows that exact bounded error; update or reconfigure the distribution rather than weakening isolation.
 
 ## Claude Code
 
-Shell aliases can hide multiple installations. Automatic selection uses the first executable named `claude` in `PATH`, then falls back to the native installer's `~/.local/bin/claude` path so a new/self-updated CLI is still found before the shell refreshes PATH. `humansh setup` lists distinct PATH installations and lets you pin the one whose subscription login works. The selected path is verified before the final setup confirmation. You can also change it directly:
+Shell aliases can hide multiple installations. Automatic selection uses the first executable named `claude` in `PATH`, then falls back to the native installer's `~/.local/bin/claude` path so a new/self-updated CLI is still found before the shell refreshes PATH. `humansh setup` lists distinct PATH installations and lets you pin the one whose provider-managed inference works. The selected path is verified before the final setup confirmation. You can also change it directly:
 
 ```sh
 humansh config set providers.claude.binary /absolute/path/to/claude
 humansh config set providers.claude.binary auto
 ```
 
-```sh
-claude auth login --claudeai
-claude auth status --text
-claude update
-humansh provider test claude
-```
+Run `humansh provider test claude`. Humansh uses `claude -p` for its minimal live check and does not invoke `claude auth` subcommands. If a corporate distribution says login is disabled but normal print mode works, that is supported. Follow that distribution's own authentication procedure only when the inference command itself fails.
 
-Unset `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, custom base URLs, and Bedrock/Vertex/Foundry selectors before using the subscription adapter.
+Known parent-shell API keys, auth tokens, custom base URLs, and Bedrock/Vertex/Foundry selectors are not inherited by the isolated Claude subprocess. Required production flags still fail closed if the selected distribution does not implement them.
 
 ## Cursor CLI
 
@@ -78,16 +64,13 @@ humansh config set providers.cursor.binary /absolute/path/to/cursor-agent
 humansh config set providers.cursor.binary auto
 ```
 
-Repair and test the browser login with:
+Test the complete structured invocation with:
 
 ```sh
-cursor-agent login
-cursor-agent status
-cursor-agent update
 humansh provider test cursor
 ```
 
-Unset `CURSOR_API_KEY`, `CURSOR_AUTH_TOKEN`, and `CURSOR_API_ENDPOINT` before using the Cursor subscription adapter. If doctor says the installed CLI lacks read-only Ask mode, sandboxing, trust, or JSON output, update Cursor CLI rather than weakening those controls.
+Humansh treats Cursor authentication as provider-managed and does not call its login/status commands. Known parent-shell API/auth/endpoint overrides are not inherited. If the selected distribution rejects read-only Ask mode, sandboxing, trust, or JSON output during the full test, update or reconfigure it rather than weakening those controls.
 
 ## OpenRouter
 

@@ -144,7 +144,7 @@ func build(diagnostic bool) (Runtime, error) {
 
 func configuredProviders(cfg config.RuntimeConfig, paths config.Paths) (llm.MapRegistry, error) {
 	return llm.NewRegistry(
-		codex.Adapter{Config: codex.Config{Model: cfg.Codex.Model, Timeout: cfg.Timeout, SubscriptionAuthConfirmed: cfg.Codex.SubscriptionAuthConfirmed, AuthRecordPath: paths.CodexAuthRecord}},
+		codex.Adapter{Config: codex.Config{Model: cfg.Codex.Model, Timeout: cfg.Timeout}},
 		claude.Adapter{Config: claude.Config{Binary: cfg.Claude.Binary, Model: cfg.Claude.Model, Timeout: cfg.Timeout}},
 		cursor.Adapter{Config: cursor.Config{Binary: cfg.Cursor.Binary, Model: cfg.Cursor.Model, Timeout: cfg.Timeout}},
 		openrouter.Adapter{Config: openrouter.Config{Model: cfg.OpenRouter.Model, BaseURL: cfg.OpenRouter.BaseURL, Timeout: cfg.Timeout, StructuredOutputProven: cfg.OpenRouter.StructuredOutputProven}, KeyLoader: func() (string, error) {

@@ -9,7 +9,22 @@ import (
 
 	usererr "github.com/agenticlab-ai/humansh/internal/errors"
 	"github.com/agenticlab-ai/humansh/internal/llm"
+	"github.com/agenticlab-ai/humansh/internal/processrunner"
 )
+
+func TestProbeRequiresAnExactResponseMarker(t *testing.T) {
+	t.Parallel()
+	base := llm.Diagnostic{Installed: true, Configured: true, AuthMode: "provider_managed"}
+	success := ProbeDiagnostic(base, llm.Claude, 20*time.Second, processrunner.Result{Stdout: []byte("  " + ProbeMarker + "\n")}, nil)
+	if !success.Available || !success.LiveCheck {
+		t.Fatalf("exact marker diagnostic=%+v", success)
+	}
+
+	echoedPrompt := ProbeDiagnostic(base, llm.Claude, 20*time.Second, processrunner.Result{Stdout: []byte(ProbePrompt)}, nil)
+	if echoedPrompt.Available || !echoedPrompt.LiveCheck {
+		t.Fatalf("echoed prompt diagnostic=%+v", echoedPrompt)
+	}
+}
 
 func TestCLIErrorCatalogMappings(t *testing.T) {
 	t.Parallel()

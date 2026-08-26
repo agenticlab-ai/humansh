@@ -18,25 +18,25 @@ import (
 	"github.com/agenticlab-ai/humansh/internal/exitcode"
 	"github.com/agenticlab-ai/humansh/internal/llm"
 	"github.com/agenticlab-ai/humansh/internal/llm/contracttest"
+	"github.com/agenticlab-ai/humansh/internal/llm/providerutil"
 	"github.com/agenticlab-ai/humansh/internal/processrunner"
 	"github.com/agenticlab-ai/humansh/internal/prompt"
 )
 
 type fakeRunner struct {
-	calls      []processrunner.Spec
-	deadlines  []bool
-	deadlineAt []time.Time
-	auth       string
-	version    string
-	help       string
-	output     string
-	probeErr   error
-	modelErr   error
+	calls       []processrunner.Spec
+	deadlines   []bool
+	deadlineAt  []time.Time
+	probeOutput string
+	probeStderr string
+	probeErr    error
+	output      string
+	modelErr    error
 }
 
 func clearClaudeEnvironment(t *testing.T) {
 	t.Helper()
-	for _, keys := range [][]string{claudeOverrideEnvKeys, claudeSubscriptionEnvKeys, claudeCredentialLocationEnvKeys, claudeUserIdentityEnvKeys} {
+	for _, keys := range [][]string{claudeOverrideEnvKeys, claudeCredentialEnvKeys, claudeCredentialLocationEnvKeys, claudeUserIdentityEnvKeys} {
 		for _, key := range keys {
 			t.Setenv(key, "")
 		}
@@ -51,26 +51,12 @@ func (f *fakeRunner) Run(ctx context.Context, s processrunner.Spec) (processrunn
 	if err := ctx.Err(); err != nil {
 		return processrunner.Result{}, err
 	}
-	if len(s.Args) == 2 && s.Args[0] == "-p" && s.Args[1] == "--version" {
-		version := f.version
-		if version == "" {
-			version = "2.1.238 (Claude Code)\n"
+	if reflect.DeepEqual(s.Args, []string{"-p", providerutil.ProbePrompt}) {
+		output := f.probeOutput
+		if output == "" {
+			output = providerutil.ProbeMarker
 		}
-		return processrunner.Result{Stdout: []byte(version)}, nil
-	}
-	if len(s.Args) == 4 && s.Args[0] == "-p" && s.Args[1] == "--max-turns" && s.Args[2] == claudeMaxTurns && s.Args[3] == "--help" {
-		help := f.help
-		if help == "" {
-			help = strings.Join(requiredHelpOptions, " ")
-		}
-		return processrunner.Result{Stdout: []byte(help)}, f.probeErr
-	}
-	if len(s.Args) >= 2 && s.Args[0] == "auth" {
-		auth := f.auth
-		if auth == "" {
-			auth = `{"loggedIn":true,"authMethod":"oauth"}`
-		}
-		return processrunner.Result{Stdout: []byte(auth)}, nil
+		return processrunner.Result{Stdout: []byte(output), Stderr: []byte(f.probeStderr)}, f.probeErr
 	}
 	output := f.output
 	if output == "" {
@@ -86,7 +72,7 @@ func TestEveryProviderSubprocessIsTimedAndIsolated(t *testing.T) {
 	if _, err := adapter.Translate(context.Background(), llm.TranslationRequest{Input: "list files", Shell: "zsh"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.calls) != 4 || len(runner.deadlines) != 4 {
+	if len(runner.calls) != 1 || len(runner.deadlines) != 1 {
 		t.Fatalf("calls=%d deadlines=%d", len(runner.calls), len(runner.deadlines))
 	}
 	for index, call := range runner.calls {
@@ -100,108 +86,42 @@ func TestEveryProviderSubprocessIsTimedAndIsolated(t *testing.T) {
 			t.Errorf("call %d TMPDIR does not match isolation directory: %v", index, call.Env)
 		}
 	}
-	if runner.calls[0].Dir != runner.calls[1].Dir || runner.calls[0].Dir != runner.calls[2].Dir || runner.calls[3].Dir == runner.calls[0].Dir {
-		t.Fatalf("diagnostic/model isolation directories are wrong: %q %q %q %q", runner.calls[0].Dir, runner.calls[1].Dir, runner.calls[2].Dir, runner.calls[3].Dir)
-	}
-	if !runner.deadlineAt[3].After(runner.deadlineAt[2]) {
-		t.Fatalf("model deadline %v did not receive a fresh budget after diagnostics ending at %v", runner.deadlineAt[3], runner.deadlineAt[2])
-	}
 }
 
-func TestContradictoryAPIAuthIsRejected(t *testing.T) {
+func TestTranslateDoesNotDependOnAuthStatusSubcommands(t *testing.T) {
 	clearClaudeEnvironment(t)
-	runner := &fakeRunner{auth: `{"loggedIn":true,"authMethod":"oauth","billingMode":"api"}`}
+	runner := &fakeRunner{}
 	adapter := Adapter{Runner: runner}
-	_, err := adapter.Translate(context.Background(), llm.TranslationRequest{})
-	typed, ok := usererr.As(err)
-	if !ok || typed.ExitCode != exitcode.ProviderAuth || typed.Code != "claude_metered_auth" {
-		t.Fatalf("error=%#v", err)
+	if _, err := adapter.Translate(context.Background(), llm.TranslationRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.calls) != 1 || len(runner.calls[0].Args) == 0 || runner.calls[0].Args[0] == "auth" {
+		t.Fatalf("translation unexpectedly depended on an auth subcommand: %+v", runner.calls)
 	}
 }
 
-// TestSafeModeAndNewerClaudeVersionsStayAvailable guards the feature floor
-// against regressing to the later interface-review baseline. Claude Code
-// auto-updates, so pinning a single reviewed release would reject compatible
-// versions both immediately before and after it.
-func TestSafeModeAndNewerClaudeVersionsStayAvailable(t *testing.T) {
+func TestMinimalProbeUsesOnlyPrintAndSurfacesManagedDistributionErrors(t *testing.T) {
 	clearClaudeEnvironment(t)
-	for _, reported := range []string{"2.1.169 (Claude Code)", "2.1.235 (Claude Code)", "2.1.236 (Claude Code)", "2.1.238 (Claude Code)", "2.2.0 (Claude Code)", "3.0.0 (Claude Code)"} {
-		adapter := Adapter{Runner: &fakeRunner{version: reported + "\n"}}
-		diagnostic := adapter.Diagnose(context.Background())
-		if !diagnostic.Available || len(diagnostic.Capabilities) == 0 {
-			t.Fatalf("version %q should remain available: %+v", reported, diagnostic)
-		}
-	}
-}
-
-// TestUnreadableClaudeVersionFallsBackToProbes keeps an unparseable version
-// string from disabling a CLI whose capabilities all probe correctly.
-func TestUnreadableClaudeVersionFallsBackToProbes(t *testing.T) {
-	clearClaudeEnvironment(t)
-	adapter := Adapter{Runner: &fakeRunner{version: "claude (development build)\n"}}
-	diagnostic := adapter.Diagnose(context.Background())
-	if !diagnostic.Available || !strings.Contains(diagnostic.Message, "could not be read") {
+	runner := &fakeRunner{}
+	diagnostic := (Adapter{Runner: runner}).Probe(context.Background())
+	if !diagnostic.LiveCheck || !diagnostic.Available || !diagnostic.Authenticated || diagnostic.AuthMode != "provider_managed" {
 		t.Fatalf("diagnostic=%+v", diagnostic)
 	}
-}
+	if len(runner.calls) != 1 || !reflect.DeepEqual(runner.calls[0].Args, []string{"-p", providerutil.ProbePrompt}) {
+		t.Fatalf("probe argv=%+v", runner.calls)
+	}
 
-func TestUnqualifiedClaudeVersionFailsClosedBeforeModelCall(t *testing.T) {
-	clearClaudeEnvironment(t)
-	runner := &fakeRunner{version: "2.1.168 (Claude Code)\n"}
-	adapter := Adapter{Runner: runner}
-	diagnostic := adapter.Diagnose(context.Background())
-	if !diagnostic.Authenticated || diagnostic.Available || len(diagnostic.Capabilities) != 0 || !strings.Contains(diagnostic.Message, "predates Claude Code 2.1.169") {
-		t.Fatalf("diagnostic=%+v", diagnostic)
+	runner = &fakeRunner{
+		probeStderr: "claude: error: Login disabled by ASBX toolbox distribution. No login required.",
+		probeErr:    fmt.Errorf("exit status 1"),
 	}
-	if len(diagnostic.NextSteps) != 2 || diagnostic.NextSteps[0].Command != "claude update" || diagnostic.NextSteps[1].Command != "humansh setup" {
-		t.Fatalf("next steps=%+v", diagnostic.NextSteps)
+	diagnostic = (Adapter{Runner: runner}).Probe(context.Background())
+	if diagnostic.Available || !diagnostic.LiveCheck || !strings.Contains(diagnostic.Message, "Login disabled by ASBX toolbox distribution") {
+		t.Fatalf("failed diagnostic=%+v", diagnostic)
 	}
-	_, err := adapter.Translate(context.Background(), llm.TranslationRequest{})
-	typed, ok := usererr.As(err)
-	if !ok || typed.ExitCode != exitcode.ProviderUnavailable || typed.Code != "claude_capabilities" {
-		t.Fatalf("error=%#v", err)
-	}
-	for _, call := range runner.calls {
-		diagnosticCall := len(call.Args) == 2 && call.Args[0] == "-p" && call.Args[1] == "--version" ||
-			len(call.Args) == 4 && call.Args[0] == "-p" && call.Args[1] == "--max-turns" && call.Args[2] == claudeMaxTurns && call.Args[3] == "--help" ||
-			len(call.Args) > 0 && call.Args[0] == "auth"
-		if !diagnosticCall {
-			t.Fatalf("model call made with unqualified capabilities: %v", call.Args)
-		}
-	}
-}
-
-func TestClaudeDiagnosticReportsVersionAndLoginFailuresTogether(t *testing.T) {
-	clearClaudeEnvironment(t)
-	runner := &fakeRunner{version: "2.1.168 (Claude Code)\n", auth: `{"loggedIn":false,"authMethod":"none"}`}
-	diagnostic := (Adapter{Runner: runner}).Diagnose(context.Background())
-	if diagnostic.Authenticated || diagnostic.Available || len(diagnostic.Capabilities) != 0 {
-		t.Fatalf("diagnostic=%+v", diagnostic)
-	}
-	for _, want := range []string{"version 2.1.168", "fresh Claude Code processes report logged out"} {
-		if !strings.Contains(diagnostic.Message, want) {
-			t.Errorf("diagnostic message missing %q: %q", want, diagnostic.Message)
-		}
-	}
-	commands := make([]string, 0, len(diagnostic.NextSteps))
 	for _, action := range diagnostic.NextSteps {
-		commands = append(commands, action.Command)
-	}
-	if !reflect.DeepEqual(commands, []string{"claude update", "claude auth login --claudeai", "humansh setup"}) {
-		t.Fatalf("next-step commands=%v", commands)
-	}
-}
-
-func TestClaudeDiagnosticCommandSafelyNamesExactExecutable(t *testing.T) {
-	tests := map[string]string{
-		"":                          "claude",
-		"/Users/test/.local/claude": "/Users/test/.local/claude",
-		"/tmp/Claude Code/claude":   `'/tmp/Claude Code/claude'`,
-		"/tmp/it's/claude":          `'/tmp/it'"'"'s/claude'`,
-	}
-	for executable, want := range tests {
-		if got := claudeDiagnosticCommand(executable); got != want {
-			t.Errorf("claudeDiagnosticCommand(%q)=%q want %q", executable, got, want)
+		if strings.Contains(action.Command, "auth") || strings.Contains(action.Command, "login") {
+			t.Fatalf("probe failure prescribed unsupported auth command: %+v", diagnostic.NextSteps)
 		}
 	}
 }
@@ -235,15 +155,15 @@ func TestAutomaticClaudeSelectionFindsNativeInstallBeforeShellPathRefresh(t *tes
 	}
 }
 
-func TestClaudeSubscriptionOAuthEnvironmentIsForwardedWithoutDisclosure(t *testing.T) {
+func TestClaudeProviderOAuthEnvironmentIsForwardedWithoutDisclosure(t *testing.T) {
 	clearClaudeEnvironment(t)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-access-secret")
 	t.Setenv("CLAUDE_CODE_OAUTH_REFRESH_TOKEN", "test-oauth-refresh-secret")
 	t.Setenv("CLAUDE_CODE_OAUTH_SCOPES", "user:profile user:inference")
 	t.Setenv("GITHUB_TOKEN", "unrelated-secret")
-	runner := &fakeRunner{auth: `{"loggedIn":true,"authMethod":"oauth_token","apiProvider":"firstParty"}`}
+	runner := &fakeRunner{}
 	adapter := Adapter{Runner: runner}
-	diagnostic := adapter.Diagnose(context.Background())
+	diagnostic := adapter.Probe(context.Background())
 	if !diagnostic.Available {
 		t.Fatalf("diagnostic=%+v", diagnostic)
 	}
@@ -288,7 +208,7 @@ func TestClaudeCredentialLocationsAndKeychainIdentityAreForwarded(t *testing.T) 
 	t.Setenv("LOGNAME", "test-login")
 	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "must-not-leak"))
 	runner := &fakeRunner{}
-	diagnostic := (Adapter{Runner: runner}).Diagnose(context.Background())
+	diagnostic := (Adapter{Runner: runner}).Probe(context.Background())
 	if !diagnostic.Available {
 		t.Fatalf("diagnostic=%+v", diagnostic)
 	}
@@ -316,7 +236,7 @@ func TestClaudeRelativeCredentialLocationsAreNotForwarded(t *testing.T) {
 		t.Setenv(key, "project-controlled-relative-path")
 	}
 	runner := &fakeRunner{}
-	(Adapter{Runner: runner}).Diagnose(context.Background())
+	(Adapter{Runner: runner}).Probe(context.Background())
 	for index, call := range runner.calls {
 		env := strings.Join(call.Env, "\n")
 		for _, key := range claudeCredentialLocationEnvKeys {
@@ -327,45 +247,7 @@ func TestClaudeRelativeCredentialLocationsAreNotForwarded(t *testing.T) {
 	}
 }
 
-func TestParseAuthFixtures(t *testing.T) {
-	tests := []struct {
-		name string
-		json string
-		want string
-	}{
-		{"oauth", `{"loggedIn":true,"authMethod":"oauth"}`, "claude.ai"},
-		{"oauth-token", `{"loggedIn":true,"authMethod":"oauth_token","apiProvider":"firstParty"}`, "claude.ai"},
-		{"claude-ai", `{"authenticated":true,"provider":"claude.ai subscription"}`, "claude.ai"},
-		{"api-key-none-is-not-api", `{"loggedIn":true,"authMethod":"oauth","apiKeySource":"none"}`, "claude.ai"},
-		{"contradictory-api-wins", `{"loggedIn":true,"authMethod":"oauth","billingMode":"api"}`, "api"},
-		{"bedrock", `{"loggedIn":true,"provider":"bedrock"}`, "api"},
-		{"logged-out", `{"loggedIn":false}`, "logged_out"},
-		{"malformed", `{`, "unknown"},
-		{"unrecognized", `{"loggedIn":true,"authMethod":"future-mode"}`, "unknown"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := parseAuth([]byte(test.json)); got != test.want {
-				t.Fatalf("parseAuth(%s)=%q want %q", test.json, got, test.want)
-			}
-		})
-	}
-}
-
-func TestMaxTurnsCapabilityUsesParserProbeInsteadOfHelpText(t *testing.T) {
-	clearClaudeEnvironment(t)
-	helpWithoutMaxTurns := strings.Join(requiredHelpOptions, " ")
-	accepted := Adapter{Runner: &fakeRunner{help: helpWithoutMaxTurns}}
-	if diagnostic := accepted.Diagnose(context.Background()); !diagnostic.Available {
-		t.Fatalf("parser-accepted --max-turns was rejected because help omitted it: %+v", diagnostic)
-	}
-	rejected := Adapter{Runner: &fakeRunner{help: helpWithoutMaxTurns, probeErr: fmt.Errorf("unknown option --max-turns")}}
-	if diagnostic := rejected.Diagnose(context.Background()); diagnostic.Available || len(diagnostic.Capabilities) != 0 {
-		t.Fatalf("parser-rejected --max-turns was accepted: %+v", diagnostic)
-	}
-}
-
-func TestSafeSubscriptionInvocation(t *testing.T) {
+func TestSafeStructuredInvocation(t *testing.T) {
 	clearClaudeEnvironment(t)
 	runner := &fakeRunner{}
 	adapter := Adapter{Runner: runner}
@@ -376,7 +258,7 @@ func TestSafeSubscriptionInvocation(t *testing.T) {
 	if response.Command != "ls" {
 		t.Fatalf("response=%+v", response)
 	}
-	call := runner.calls[3]
+	call := runner.calls[0]
 	wireSchema, err := claudeWireSchema()
 	if err != nil {
 		t.Fatal(err)
@@ -428,17 +310,19 @@ func TestClaudeWireSchemaOmitsOnlyUnsupportedDialectMetadata(t *testing.T) {
 	}
 }
 
-func TestParentAPIOverrideRejectedBeforeModelCall(t *testing.T) {
+func TestParentAPIOverrideIsNotForwarded(t *testing.T) {
 	clearClaudeEnvironment(t)
 	t.Setenv("ANTHROPIC_API_KEY", "secret")
 	runner := &fakeRunner{}
 	adapter := Adapter{Runner: runner}
-	_, err := adapter.Translate(context.Background(), llm.TranslationRequest{})
-	if err == nil {
-		t.Fatal("override accepted")
+	if _, err := adapter.Translate(context.Background(), llm.TranslationRequest{}); err != nil {
+		t.Fatal(err)
 	}
-	if len(runner.calls) != 0 {
-		t.Fatalf("model/auth subprocess called %d times", len(runner.calls))
+	if len(runner.calls) != 1 {
+		t.Fatalf("model subprocess calls=%d", len(runner.calls))
+	}
+	if env := strings.Join(runner.calls[0].Env, "\n"); strings.Contains(env, "ANTHROPIC_API_KEY") || strings.Contains(env, "secret") {
+		t.Fatalf("parent API override leaked to Claude: %v", runner.calls[0].Env)
 	}
 }
 
@@ -478,7 +362,7 @@ func TestNonzeroClaudeJSONFailureIsShownAndClassified(t *testing.T) {
 	if !ok || typed.ExitCode != exitcode.ProviderAuth || typed.Code != "claude_translation_auth" {
 		t.Fatalf("error=%#v", err)
 	}
-	for _, want := range []string{"Not logged in", "did not accept the login", "claude auth login --claudeai", "humansh provider test claude"} {
+	for _, want := range []string{"Not logged in", "provider-managed authentication", "humansh provider test claude"} {
 		if !strings.Contains(usererr.Render(typed, false), want) {
 			t.Errorf("normal error missing %q:\n%s", want, usererr.Render(typed, false))
 		}
@@ -516,16 +400,7 @@ func TestTrailingClaudeEnvelopeDataIsRejected(t *testing.T) {
 
 type staticClaudeRunner struct{ output string }
 
-func (r *staticClaudeRunner) Run(_ context.Context, spec processrunner.Spec) (processrunner.Result, error) {
-	if len(spec.Args) == 2 && spec.Args[0] == "-p" && spec.Args[1] == "--version" {
-		return processrunner.Result{Stdout: []byte("2.1.238 (Claude Code)")}, nil
-	}
-	if len(spec.Args) == 4 && spec.Args[0] == "-p" && spec.Args[1] == "--max-turns" && spec.Args[2] == claudeMaxTurns && spec.Args[3] == "--help" {
-		return processrunner.Result{Stdout: []byte(strings.Join(requiredHelpOptions, " "))}, nil
-	}
-	if len(spec.Args) > 0 && spec.Args[0] == "auth" {
-		return processrunner.Result{Stdout: []byte(`{"loggedIn":true,"authMethod":"oauth"}`)}, nil
-	}
+func (r *staticClaudeRunner) Run(_ context.Context, _ processrunner.Spec) (processrunner.Result, error) {
 	return processrunner.Result{Stdout: []byte(r.output)}, nil
 }
 
@@ -534,15 +409,6 @@ type stderrClaudeRunner struct {
 	err    error
 }
 
-func (r *stderrClaudeRunner) Run(_ context.Context, spec processrunner.Spec) (processrunner.Result, error) {
-	if len(spec.Args) == 2 && spec.Args[0] == "-p" && spec.Args[1] == "--version" {
-		return processrunner.Result{Stdout: []byte("2.1.238 (Claude Code)")}, nil
-	}
-	if len(spec.Args) == 4 && spec.Args[0] == "-p" && spec.Args[1] == "--max-turns" && spec.Args[2] == claudeMaxTurns && spec.Args[3] == "--help" {
-		return processrunner.Result{Stdout: []byte(strings.Join(requiredHelpOptions, " "))}, nil
-	}
-	if len(spec.Args) > 0 && spec.Args[0] == "auth" {
-		return processrunner.Result{Stdout: []byte(`{"loggedIn":true,"authMethod":"oauth"}`)}, nil
-	}
+func (r *stderrClaudeRunner) Run(_ context.Context, _ processrunner.Spec) (processrunner.Result, error) {
 	return processrunner.Result{Stderr: []byte(r.stderr)}, r.err
 }

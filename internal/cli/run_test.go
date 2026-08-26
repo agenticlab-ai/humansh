@@ -36,19 +36,11 @@ func isolatedEnv(t *testing.T) string {
 
 func installReadyCodexFixture(t *testing.T, home string) {
 	t.Helper()
-	codexHome := filepath.Join(home, "codex")
-	if err := os.MkdirAll(codexHome, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"test-only"}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	_ = home
 	binDir := t.TempDir()
 	script := `#!/bin/sh
 case "${1-} ${2-}" in
-  "exec --version") echo "codex-cli-exec 0.149.0" ;;
-  "exec --help") echo "--ephemeral --skip-git-repo-check --sandbox --ignore-user-config --ignore-rules --strict-config --color --output-schema --output-last-message --cd" ;;
-  "login status") echo "Logged in using ChatGPT" ;;
+  "exec Reply with exactly HUMANSH_READY and nothing else. Do not use tools or inspect external state.") echo "HUMANSH_READY" ;;
   *) exit 2 ;;
 esac
 `
@@ -664,8 +656,10 @@ func TestSetupAndClassifierStdin(t *testing.T) {
 }
 
 type setupTestProvider struct {
-	id         llm.ProviderID
-	diagnostic llm.Diagnostic
+	id              llm.ProviderID
+	diagnostic      llm.Diagnostic
+	probeDiagnostic *llm.Diagnostic
+	probeCalls      int
 }
 
 type recordingProviderSetup struct {
@@ -852,10 +846,7 @@ func TestChoosingOpenRouterFromSetupMenuConfiguresItInPlace(t *testing.T) {
 	var out, errOut bytes.Buffer
 	ui := interactiveSetupUI("4\nsk-or-menu-test\nprovider/menu-model\n", &out, &errOut)
 
-	selected, ready, code := configureSetupProvider(context.Background(), &runtime, &cfg, "", false, ui, &pending, func(context.Context, llm.ProviderID, string, IO) error {
-		t.Fatal("OpenRouter setup must not launch a subscription login")
-		return nil
-	})
+	selected, ready, code := configureSetupProvider(context.Background(), &runtime, &cfg, "", false, ui, &pending)
 	if code != 0 || !ready || selected != llm.OpenRouter || pending == nil {
 		t.Fatalf("selected=%s ready=%t pending=%+v code=%d out=%s err=%s", selected, ready, pending, code, out.String(), errOut.String())
 	}
@@ -943,6 +934,15 @@ func (p *setupTestProvider) ID() llm.ProviderID { return p.id }
 func (p *setupTestProvider) Diagnose(context.Context) llm.Diagnostic {
 	return p.diagnostic
 }
+func (p *setupTestProvider) Probe(context.Context) llm.Diagnostic {
+	p.probeCalls++
+	diagnostic := p.diagnostic
+	if p.probeDiagnostic != nil {
+		diagnostic = *p.probeDiagnostic
+	}
+	diagnostic.LiveCheck = true
+	return diagnostic
+}
 func (*setupTestProvider) Translate(context.Context, llm.TranslationRequest) (llm.TranslationResponse, error) {
 	return llm.TranslationResponse{}, nil
 }
@@ -976,7 +976,7 @@ func TestProviderHelpExplainsCommandsAndNextStep(t *testing.T) {
 
 	out.Reset()
 	code = runProvider(context.Background(), []string{"configure"}, rt, IO{Out: &out, Err: &errOut})
-	if code != 0 || !strings.Contains(out.String(), "Configure a provider's authentication or model") || !strings.Contains(out.String(), "configure openrouter --model") {
+	if code != 0 || !strings.Contains(out.String(), "Inspect CLI authentication ownership or configure an API provider") || !strings.Contains(out.String(), "configure openrouter --model") {
 		t.Fatalf("configure help code=%d out=%s err=%s", code, out.String(), errOut.String())
 	}
 
@@ -1000,7 +1000,7 @@ func TestProviderCobraHelpUsesOrientedGuide(t *testing.T) {
 
 	out.Reset()
 	code = Run(context.Background(), []string{"provider", "configure", "--help"}, IO{Out: &out, Err: &errOut})
-	if code != 0 || errOut.Len() != 0 || !strings.Contains(out.String(), "Configure a provider's authentication or model") {
+	if code != 0 || errOut.Len() != 0 || !strings.Contains(out.String(), "Inspect CLI authentication ownership or configure an API provider") {
 		t.Fatalf("provider configure --help code=%d out=%s err=%s", code, out.String(), errOut.String())
 	}
 }
@@ -1012,14 +1012,16 @@ func TestProviderListIsReadableAndMarksCurrentProvider(t *testing.T) {
 			Installed: true, AuthMode: "missing", Message: "API key not configured",
 		}},
 		llm.Cursor: &setupTestProvider{id: llm.Cursor, diagnostic: llm.Diagnostic{
-			Installed: true, Configured: true, Authenticated: true, Available: true, AuthMode: "cursor.com", Version: "2026.08.11",
+			Installed: true, Configured: true, AuthMode: "provider_managed",
+			NextSteps: []llm.DiagnosticAction{{Description: "Run a live provider check", Command: "humansh provider test cursor"}},
 		}},
 		llm.Claude: &setupTestProvider{id: llm.Claude, diagnostic: llm.Diagnostic{
-			Installed: true, Configured: true, AuthMode: "logged_out", Capabilities: []string{"safe-mode"},
-			NextSteps: []llm.DiagnosticAction{{Description: "Sign in", Command: "/selected/claude auth login --claudeai"}},
+			Installed: true, Configured: true, AuthMode: "provider_managed",
+			NextSteps: []llm.DiagnosticAction{{Description: "Run a live provider check", Command: "humansh provider test claude"}},
 		}},
 		llm.Codex: &setupTestProvider{id: llm.Codex, diagnostic: llm.Diagnostic{
-			Installed: true, Configured: true, Authenticated: true, Available: true, AuthMode: "chatgpt",
+			Installed: true, Configured: true, AuthMode: "provider_managed",
+			NextSteps: []llm.DiagnosticAction{{Description: "Run a live provider check", Command: "humansh provider test codex"}},
 		}},
 	}
 	cfg := config.Default()
@@ -1035,13 +1037,14 @@ func TestProviderListIsReadableAndMarksCurrentProvider(t *testing.T) {
 	for _, want := range []string{
 		"AI providers",
 		"PROVIDER     HUMANSH NAME  STATUS",
-		"✓ Codex        codex",
-		"Ready — ChatGPT subscription",
+		"? Codex        codex",
+		"Installed — live check pending",
+		"Next: humansh provider test codex",
 		"Claude Code  claude",
-		"Fresh CLI logged out",
-		"Next: /selected/claude auth login --claudeai",
-		"✓ Cursor CLI   cursor",
-		"Ready — Cursor account  (current)",
+		"Next: humansh provider test claude",
+		"? Cursor CLI   cursor",
+		"Next: humansh provider test cursor",
+		"(current)",
 		"OpenRouter   openrouter",
 		"Not configured — metered",
 		"Next: humansh provider configure openrouter",
@@ -1051,7 +1054,7 @@ func TestProviderListIsReadableAndMarksCurrentProvider(t *testing.T) {
 			t.Errorf("provider list missing %q:\n%s", want, text)
 		}
 	}
-	for _, unwanted := range []string{"installed=", "configured=", "authenticated=", "usable=", "2026.08.11", "safe-mode"} {
+	for _, unwanted := range []string{"installed=", "configured=", "authenticated=", "usable=", "auth login", "login status"} {
 		if strings.Contains(text, unwanted) {
 			t.Errorf("provider list exposed raw diagnostic %q:\n%s", unwanted, text)
 		}
@@ -1069,7 +1072,7 @@ func TestProviderListIsReadableAndMarksCurrentProvider(t *testing.T) {
 func TestProviderListJSONIncludesCurrentAndCompleteDiagnostics(t *testing.T) {
 	t.Parallel()
 	provider := &setupTestProvider{id: llm.Claude, diagnostic: llm.Diagnostic{
-		Installed: true, Configured: true, Authenticated: true, Available: true, AuthMode: "claude.ai", Executable: "/selected/claude",
+		Installed: true, Configured: true, Authenticated: true, Available: true, LiveCheck: true, AuthMode: "provider_managed", Executable: "/selected/claude",
 	}}
 	cfg := config.Default()
 	cfg.Provider = llm.Claude
@@ -1089,71 +1092,63 @@ func TestProviderListJSONIncludesCurrentAndCompleteDiagnostics(t *testing.T) {
 	}
 }
 
-func TestInteractiveSetupCanRunOfficialSubscriptionLogin(t *testing.T) {
-	provider := &setupTestProvider{id: llm.Codex, diagnostic: llm.Diagnostic{Installed: true, Configured: true, AuthMode: "api_key", Capabilities: []string{"safe-mode"}, Message: "usage-based API key"}}
+func TestSetupUsesOneLiveProbeWithoutOpeningLogin(t *testing.T) {
+	ready := llm.Diagnostic{Installed: true, Configured: true, Authenticated: true, Available: true, AuthMode: "provider_managed", Message: "Codex responded to a minimal inference prompt"}
+	provider := &setupTestProvider{
+		id:              llm.Codex,
+		diagnostic:      llm.Diagnostic{Installed: true, Configured: true, AuthMode: "provider_managed", Message: "live inference has not been checked"},
+		probeDiagnostic: &ready,
+	}
 	rt := bootstrap.Runtime{Engine: app.Engine{Providers: llm.MapRegistry{llm.Codex: provider}}, Config: config.Default()}
 	var out, errOut bytes.Buffer
-	loginCalls := 0
-	selected, ok, code := selectSetupProviderWithLogin(context.Background(), rt, "codex", false, true, IO{In: strings.NewReader("y\n"), Out: &out, Err: &errOut}, func(_ context.Context, id llm.ProviderID, _ string, _ IO) error {
-		loginCalls++
-		if id != llm.Codex {
-			t.Fatalf("login provider=%s", id)
-		}
-		provider.diagnostic = llm.Diagnostic{Installed: true, Configured: true, Authenticated: true, Available: true, AuthMode: "chatgpt"}
-		return nil
-	})
-	if code != 0 || !ok || selected != llm.Codex || loginCalls != 1 {
-		t.Fatalf("selected=%s ok=%t code=%d calls=%d out=%s err=%s", selected, ok, code, loginCalls, out.String(), errOut.String())
+	selected, ok, code := selectSetupProvider(context.Background(), rt, "codex", false, true, IO{In: strings.NewReader(""), Out: &out, Err: &errOut})
+	if code != 0 || !ok || selected != llm.Codex || provider.probeCalls != 1 {
+		t.Fatalf("selected=%s ok=%t code=%d probes=%d out=%s err=%s", selected, ok, code, provider.probeCalls, out.String(), errOut.String())
 	}
-	if !strings.Contains(out.String(), "metered or overridden authentication") || !strings.Contains(out.String(), "Sign in to Codex now?") {
-		t.Fatalf("setup did not explain replacement login:\n%s", out.String())
+	for _, unwanted := range []string{"login", "auth status", "subscription"} {
+		if strings.Contains(strings.ToLower(out.String()+errOut.String()), unwanted) {
+			t.Fatalf("setup mentioned unsupported %q flow:\n%s%s", unwanted, out.String(), errOut.String())
+		}
 	}
 }
 
-func TestSetupResolvesClaudeCapabilitiesBeforeOfferingLogin(t *testing.T) {
-	provider := &setupTestProvider{id: llm.Claude, diagnostic: llm.Diagnostic{
-		Installed:  true,
-		AuthMode:   "logged_out",
+func TestSetupReturnsExactLiveProbeFailureWithoutAuthAdvice(t *testing.T) {
+	failed := llm.Diagnostic{
+		Installed: true, Configured: true, LiveCheck: true, AuthMode: "provider_managed",
 		Executable: "/selected/claude",
-		Version:    "2.1.168 (Claude Code)",
-		Message:    "version 2.1.168 predates safe mode; fresh Claude Code processes report logged out",
-		NextSteps: []llm.DiagnosticAction{
-			{Description: "Update Claude Code", Command: "claude update"},
-			{Description: "Sign in", Command: "claude auth login --claudeai"},
-		},
-	}}
+		Message:    "Claude Code reported: organization policy denied inference",
+		NextSteps:  []llm.DiagnosticAction{{Description: "Check", Command: "humansh provider test claude"}},
+	}
+	provider := &setupTestProvider{
+		id:              llm.Claude,
+		diagnostic:      llm.Diagnostic{Installed: true, Configured: true, AuthMode: "provider_managed", Executable: "/selected/claude"},
+		probeDiagnostic: &failed,
+	}
 	rt := bootstrap.Runtime{Engine: app.Engine{Providers: llm.MapRegistry{llm.Claude: provider}}, Config: config.Default()}
 	var out, errOut bytes.Buffer
-	loginCalls := 0
-	_, ok, code := selectSetupProviderWithLogin(context.Background(), rt, "claude", false, true, IO{In: strings.NewReader("y\n"), Out: &out, Err: &errOut}, func(context.Context, llm.ProviderID, string, IO) error {
-		loginCalls++
-		return nil
-	})
-	if code != protocol.ExitProviderUnavailable || ok || loginCalls != 0 {
-		t.Fatalf("ok=%t code=%d login calls=%d out=%s err=%s", ok, code, loginCalls, out.String(), errOut.String())
+	_, ok, code := selectSetupProvider(context.Background(), rt, "claude", false, true, IO{In: strings.NewReader(""), Out: &out, Err: &errOut})
+	if code != protocol.ExitProviderUnavailable || ok || provider.probeCalls != 1 {
+		t.Fatalf("ok=%t code=%d probes=%d out=%s err=%s", ok, code, provider.probeCalls, out.String(), errOut.String())
 	}
-	if strings.Contains(out.String(), "Sign in to Claude Code now?") || !strings.Contains(out.String(), "Update needed") {
-		t.Fatalf("setup offered login before resolving the capability block:\n%s", out.String())
-	}
-	for _, want := range []string{`Executable "/selected/claude"`, "claude update", "claude auth login --claudeai"} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("provider guidance missing %q:\n%s", want, out.String())
+	combined := out.String() + errOut.String()
+	for _, want := range []string{`Executable "/selected/claude"`, "organization policy denied inference", "humansh provider test claude"} {
+		if !strings.Contains(combined, want) {
+			t.Errorf("provider guidance missing %q:\n%s", want, combined)
 		}
 	}
-	if !strings.Contains(errOut.String(), "is not ready; setup made no changes") {
-		t.Fatalf("final setup error did not point back to the recovery steps: %s", errOut.String())
+	for _, unwanted := range []string{"auth login", "Sign in to Claude"} {
+		if strings.Contains(combined, unwanted) {
+			t.Errorf("provider guidance prescribed unsupported auth flow %q:\n%s", unwanted, combined)
+		}
 	}
 }
 
 func TestInteractiveSetupAlwaysAsksWhichProviderToUse(t *testing.T) {
-	codexProvider := &setupTestProvider{id: llm.Codex, diagnostic: llm.Diagnostic{Installed: true, Available: true, Authenticated: true, AuthMode: "chatgpt"}}
-	claudeProvider := &setupTestProvider{id: llm.Claude, diagnostic: llm.Diagnostic{Installed: true, Available: true, Authenticated: true, AuthMode: "claude.ai"}}
+	codexProvider := &setupTestProvider{id: llm.Codex, diagnostic: llm.Diagnostic{Installed: true, Available: true, Authenticated: true, AuthMode: "provider_managed"}}
+	claudeProvider := &setupTestProvider{id: llm.Claude, diagnostic: llm.Diagnostic{Installed: true, Available: true, Authenticated: true, AuthMode: "provider_managed"}}
 	rt := bootstrap.Runtime{Engine: app.Engine{Providers: llm.MapRegistry{llm.Codex: codexProvider, llm.Claude: claudeProvider}}, Config: config.Default()}
 	var out, errOut bytes.Buffer
-	selected, ok, code := selectSetupProviderWithLogin(context.Background(), rt, "", false, true, IO{In: strings.NewReader("2\n"), Out: &out, Err: &errOut}, func(context.Context, llm.ProviderID, string, IO) error {
-		t.Fatal("login should not be opened for a ready provider")
-		return nil
-	})
+	selected, ok, code := selectSetupProvider(context.Background(), rt, "", false, true, IO{In: strings.NewReader("2\n"), Out: &out, Err: &errOut})
 	if code != 0 || !ok || selected != llm.Claude {
 		t.Fatalf("selected=%s ok=%t code=%d out=%s err=%s", selected, ok, code, out.String(), errOut.String())
 	}
@@ -1165,94 +1160,29 @@ func TestInteractiveSetupAlwaysAsksWhichProviderToUse(t *testing.T) {
 }
 
 func TestSetupHidesUnselectedProviderDiagnostics(t *testing.T) {
-	codexProvider := &setupTestProvider{id: llm.Codex, diagnostic: llm.Diagnostic{Installed: true, Available: true, Authenticated: true, AuthMode: "chatgpt"}}
+	codexProvider := &setupTestProvider{id: llm.Codex, diagnostic: llm.Diagnostic{Installed: true, Available: true, Authenticated: true, AuthMode: "provider_managed"}}
 	claudeProvider := &setupTestProvider{id: llm.Claude, diagnostic: llm.Diagnostic{
-		Installed:    true,
-		AuthMode:     "logged_out",
-		Executable:   "/hidden/claude",
-		Version:      "2.1.235 (Claude Code)",
-		Capabilities: []string{"safe-mode"},
-		Message:      "fresh Claude Code processes report logged out",
-		NextSteps:    []llm.DiagnosticAction{{Description: "Sign in", Command: "/hidden/claude auth login --claudeai"}},
+		Installed:  true,
+		Configured: true,
+		AuthMode:   "provider_managed",
+		Executable: "/hidden/claude",
+		Message:    "private corporate gateway diagnostic",
+		NextSteps:  []llm.DiagnosticAction{{Description: "Vendor recovery", Command: "/hidden/vendor-repair"}},
 	}}
 	openRouterProvider := &setupTestProvider{id: llm.OpenRouter, diagnostic: llm.Diagnostic{Installed: true, AuthMode: "missing", Message: "OpenRouter API key is not configured"}}
 	rt := bootstrap.Runtime{Engine: app.Engine{Providers: llm.MapRegistry{llm.Codex: codexProvider, llm.Claude: claudeProvider, llm.OpenRouter: openRouterProvider}}, Config: config.Default()}
 	var out, errOut bytes.Buffer
-	selected, ok, code := selectSetupProviderWithLogin(context.Background(), rt, "", false, true, IO{In: strings.NewReader("\n"), Out: &out, Err: &errOut}, func(context.Context, llm.ProviderID, string, IO) error {
-		t.Fatal("login should not be opened for the selected ready provider")
-		return nil
-	})
+	selected, ok, code := selectSetupProvider(context.Background(), rt, "", false, true, IO{In: strings.NewReader("\n"), Out: &out, Err: &errOut})
 	if code != 0 || !ok || selected != llm.Codex {
 		t.Fatalf("selected=%s ok=%t code=%d out=%s err=%s", selected, ok, code, out.String(), errOut.String())
 	}
-	for _, hidden := range []string{"/hidden/claude", "2.1.235", "fresh Claude Code processes", "auth login --claudeai", "OpenRouter API key"} {
+	for _, hidden := range []string{"/hidden/claude", "private corporate gateway diagnostic", "/hidden/vendor-repair", "OpenRouter API key"} {
 		if strings.Contains(out.String(), hidden) {
 			t.Errorf("unselected diagnostic %q leaked into setup:\n%s", hidden, out.String())
 		}
 	}
-	if !strings.Contains(out.String(), "2  Claude Code   Fresh CLI logged out") {
-		t.Fatalf("compact Claude status did not distinguish a fresh process:\n%s", out.String())
-	}
-}
-
-func TestSetupOpensLoginForTheExactDiagnosedClaudeExecutable(t *testing.T) {
-	provider := &setupTestProvider{id: llm.Claude, diagnostic: llm.Diagnostic{
-		Installed:     true,
-		Configured:    true,
-		Authenticated: false,
-		AuthMode:      "logged_out",
-		Executable:    "/selected/claude",
-		Version:       "2.1.238 (Claude Code)",
-		Capabilities:  []string{"safe-mode"},
-		Message:       "fresh Claude Code processes report logged out",
-		NextSteps: []llm.DiagnosticAction{
-			{Description: "Sign in", Command: "/selected/claude auth login --claudeai"},
-		},
-	}}
-	rt := bootstrap.Runtime{Engine: app.Engine{Providers: llm.MapRegistry{llm.Claude: provider}}, Config: config.Default()}
-	var out, errOut bytes.Buffer
-	loginExecutable := ""
-	selected, ok, code := selectSetupProviderWithLogin(context.Background(), rt, "claude", false, true, IO{In: strings.NewReader("y\n"), Out: &out, Err: &errOut}, func(_ context.Context, id llm.ProviderID, executable string, _ IO) error {
-		if id != llm.Claude {
-			t.Fatalf("login provider=%s", id)
-		}
-		loginExecutable = executable
-		provider.diagnostic.Authenticated = true
-		provider.diagnostic.Available = true
-		provider.diagnostic.AuthMode = "claude.ai"
-		provider.diagnostic.Message = "ready"
-		return nil
-	})
-	if code != 0 || !ok || selected != llm.Claude || loginExecutable != "/selected/claude" {
-		t.Fatalf("selected=%s ok=%t code=%d executable=%q out=%s err=%s", selected, ok, code, loginExecutable, out.String(), errOut.String())
-	}
-}
-
-func TestSetupOpensLoginForTheExactDiagnosedCursorExecutable(t *testing.T) {
-	provider := &setupTestProvider{id: llm.Cursor, diagnostic: llm.Diagnostic{
-		Installed: true, Configured: true, AuthMode: "logged_out", Executable: "/selected/cursor-agent",
-		Version: "2026.07.23-e383d2b", Capabilities: []string{"ask-mode-read-only"}, Message: "fresh Cursor CLI processes report logged out",
-		NextSteps: []llm.DiagnosticAction{{Description: "Sign in", Command: "/selected/cursor-agent login"}},
-	}}
-	rt := bootstrap.Runtime{Engine: app.Engine{Providers: llm.MapRegistry{llm.Cursor: provider}}, Config: config.Default()}
-	var out, errOut bytes.Buffer
-	loginExecutable := ""
-	selected, ok, code := selectSetupProviderWithLogin(context.Background(), rt, "cursor", false, true, IO{In: strings.NewReader("y\n"), Out: &out, Err: &errOut}, func(_ context.Context, id llm.ProviderID, executable string, _ IO) error {
-		if id != llm.Cursor {
-			t.Fatalf("login provider=%s", id)
-		}
-		loginExecutable = executable
-		provider.diagnostic.Authenticated = true
-		provider.diagnostic.Available = true
-		provider.diagnostic.AuthMode = "cursor.com"
-		provider.diagnostic.Message = "ready"
-		return nil
-	})
-	if code != 0 || !ok || selected != llm.Cursor || loginExecutable != "/selected/cursor-agent" {
-		t.Fatalf("selected=%s ok=%t code=%d executable=%q out=%s err=%s", selected, ok, code, loginExecutable, out.String(), errOut.String())
-	}
-	if !strings.Contains(out.String(), "Sign in to Cursor CLI now?") {
-		t.Fatalf("Cursor login was not offered clearly:\n%s", out.String())
+	if !strings.Contains(out.String(), "2  Claude Code   Installed — live check pending") {
+		t.Fatalf("compact Claude status did not distinguish a pending live check:\n%s", out.String())
 	}
 }
 

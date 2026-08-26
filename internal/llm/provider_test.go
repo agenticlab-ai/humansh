@@ -12,6 +12,9 @@ func (p registryProvider) ID() ProviderID { return p.id }
 func (registryProvider) Diagnose(context.Context) Diagnostic {
 	return Diagnostic{Available: true}
 }
+func (registryProvider) Probe(context.Context) Diagnostic {
+	return Diagnostic{Installed: true, Configured: true, Authenticated: true, Available: true, LiveCheck: true, AuthMode: "test"}
+}
 func (registryProvider) Translate(context.Context, TranslationRequest) (TranslationResponse, error) {
 	return TranslationResponse{Status: "ok", Command: "true", Explanation: "Succeeds.", Assumptions: []string{}}, nil
 }
