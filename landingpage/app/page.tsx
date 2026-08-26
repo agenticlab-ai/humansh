@@ -13,15 +13,15 @@ const trustHighlights = [
   },
   {
     index: "02",
-    eyebrow: "No extra cloud service",
-    title: "One provider request",
-    body: "An ordinary translation talks only to your chosen AI provider. The HumanSH CLI sends no telemetry or analytics.",
+    eyebrow: "No new AI bill",
+    title: "Use your current plan",
+    body: "Connect an AI subscription you already pay for. No separate API bill or extra monthly charge is required.",
   },
   {
     index: "03",
-    eyebrow: "No broad machine access",
-    title: "Your machine stays yours",
-    body: "No files, shell history, environment variables, or credentials are sent in a translation request.",
+    eyebrow: "Privacy by default",
+    title: "Your files stay on your computer",
+    body: "HumanSH sends your request and a few basic system details. Your files, command history, and passwords stay on your computer.",
   },
 ];
 

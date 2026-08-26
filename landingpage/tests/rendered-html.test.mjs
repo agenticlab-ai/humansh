@@ -73,6 +73,8 @@ test("server-renders the HumanSH landing page", async () => {
     /HumanSH puts the command in your prompt for review/,
   );
   assert.match(visibleHtml, /Keep the terminal you know/);
+  assert.match(visibleHtml, /No separate API bill or extra monthly charge/);
+  assert.match(visibleHtml, /Your files stay on your computer/);
   assert.match(visibleHtml, /Same terminal · 3 steps/);
   assert.match(visibleHtml, /Do I need to switch terminal apps\?/);
   assert.match(visibleHtml, /iTerm, Terminal\.app, VS Code(?:&#x27;|')s terminal/);
