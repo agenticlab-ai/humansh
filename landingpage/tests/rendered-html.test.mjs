@@ -43,6 +43,14 @@ test("server-renders the HumanSH landing page", async () => {
   const html = await response.text();
   const visibleHtml = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
   assert.match(html, /<title>HumanSH — Stay in your terminal<\/title>/i);
+  assert.match(
+    html,
+    /<link[^>]+rel="icon"[^>]+href="\/favicon-32\.png"[^>]*>/i,
+  );
+  assert.match(
+    html,
+    /<link[^>]+rel="apple-touch-icon"[^>]+href="\/apple-touch-icon\.png"[^>]*>/i,
+  );
   assert.match(visibleHtml, /Forgot the command\? Stay in the terminal\./);
   assert.match(visibleHtml, /curl -fsSL https:\/\/humansh\.com\/install \| bash/);
   assert.match(visibleHtml, /aria-label="Copy install command"/);
@@ -72,6 +80,12 @@ test("server-renders the HumanSH landing page", async () => {
       dataset: "humansh_web_events",
     },
   ]);
+
+  const favicon = await readFile(
+    new URL("../dist/client/favicon-32.png", import.meta.url),
+  );
+  assert.equal(favicon.readUInt32BE(16), 32);
+  assert.equal(favicon.readUInt32BE(20), 32);
 });
 
 test("redirects the branded install URL to the canonical installer", async () => {
