@@ -1119,6 +1119,105 @@ func TestSetupUsesOneLiveProbeWithoutOpeningLogin(t *testing.T) {
 	}
 }
 
+func TestInteractiveSetupRetriesSelectedProviderAfterUserFix(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	tests := []struct {
+		name             string
+		explicit         string
+		input            string
+		wantProviderMenu int
+	}{
+		{name: "provider menu selection", input: "\n\n", wantProviderMenu: 1},
+		{name: "explicit provider", explicit: "cursor", input: "\n", wantProviderMenu: 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			failed := llm.Diagnostic{
+				Installed: true, Configured: true, AuthMode: "provider_managed",
+				Message: "Cursor CLI reported: authentication must be repaired",
+			}
+			ready := llm.Diagnostic{
+				Installed: true, Configured: true, Authenticated: true, Available: true, AuthMode: "provider_managed",
+				Message: "Cursor CLI responded after authentication was repaired",
+			}
+			provider := &setupTestProvider{
+				id:         llm.Cursor,
+				diagnostic: llm.Diagnostic{Installed: true, Configured: true, AuthMode: "provider_managed"},
+			}
+			provider.probeFunc = func(context.Context) llm.Diagnostic {
+				if provider.probeCalls == 1 {
+					return failed
+				}
+				return ready
+			}
+			cfg := config.Default()
+			cfg.Provider = llm.Cursor
+			rt := bootstrap.Runtime{Engine: app.Engine{Providers: llm.MapRegistry{llm.Cursor: provider}}, Config: cfg}
+			var pending *setupOpenRouterCredential
+			var out, errOut bytes.Buffer
+			ui := interactiveSetupUI(test.input, &out, &errOut)
+
+			selected, ok, code := configureSetupProvider(context.Background(), &rt, &cfg, test.explicit, false, ui, &pending)
+			if selected != llm.Cursor || !ok || code != 0 || provider.probeCalls != 2 {
+				t.Fatalf("selected=%s ok=%t code=%d probes=%d out=%s err=%s", selected, ok, code, provider.probeCalls, out.String(), errOut.String())
+			}
+			text := out.String()
+			for _, want := range []string{"authentication must be repaired", "Fix the issue above", "Retry Cursor CLI? [Y/n]", "Using Cursor CLI"} {
+				if !strings.Contains(text, want) {
+					t.Errorf("retry flow missing %q:\n%s", want, text)
+				}
+			}
+			if count := strings.Count(text, "AI provider ["); count != test.wantProviderMenu {
+				t.Errorf("provider menu count=%d want=%d:\n%s", count, test.wantProviderMenu, text)
+			}
+			if strings.Contains(text, "Choose a different provider?") || errOut.Len() != 0 {
+				t.Fatalf("retry flow used the old recovery prompt or wrote stderr:\n%s%s", text, errOut.String())
+			}
+		})
+	}
+}
+
+func TestInteractiveSetupDeclinesRetryAndReturnsToProviderList(t *testing.T) {
+	failed := llm.Diagnostic{
+		Installed: true, Configured: true, AuthMode: "provider_managed",
+		Message: "Codex reported: authentication required",
+	}
+	codex := &setupTestProvider{
+		id:              llm.Codex,
+		diagnostic:      llm.Diagnostic{Installed: true, Configured: true, AuthMode: "provider_managed"},
+		probeDiagnostic: &failed,
+	}
+	openRouter := &setupTestProvider{
+		id:         llm.OpenRouter,
+		diagnostic: llm.Diagnostic{Installed: true, Configured: true, Authenticated: true, Available: true, LiveCheck: true, AuthMode: "api_key"},
+	}
+	rt := bootstrap.Runtime{
+		Engine: app.Engine{Providers: llm.MapRegistry{llm.Codex: codex, llm.OpenRouter: openRouter}},
+		Config: config.Default(),
+	}
+	cfg := rt.Config
+	var pending *setupOpenRouterCredential
+	var out, errOut bytes.Buffer
+	ui := interactiveSetupUI("\nn\n4\n", &out, &errOut)
+
+	selected, ok, code := configureSetupProvider(context.Background(), &rt, &cfg, "", false, ui, &pending)
+	if selected != llm.OpenRouter || !ok || code != 0 || codex.probeCalls != 1 {
+		t.Fatalf("selected=%s ok=%t code=%d probes=%d out=%s err=%s", selected, ok, code, codex.probeCalls, out.String(), errOut.String())
+	}
+	text := out.String()
+	if count := strings.Count(text, "AI provider ["); count != 2 {
+		t.Fatalf("provider menu count=%d want=2:\n%s", count, text)
+	}
+	for _, want := range []string{"Retry Codex? [Y/n]", "Answer no to return to the provider list", "Using OpenRouter"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("provider fallback flow missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Setup stopped") || errOut.Len() != 0 {
+		t.Fatalf("declining a retry stopped setup instead of returning to the provider list:\n%s%s", text, errOut.String())
+	}
+}
+
 func TestSetupCancellationStopsActiveProviderProbe(t *testing.T) {
 	started := make(chan struct{})
 	provider := &setupTestProvider{

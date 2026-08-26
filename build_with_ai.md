@@ -2203,7 +2203,7 @@ i The live check sends one constant minimal prompt and may consume a small amoun
 … Checking Codex with its normal inference command…
 ```
 
-Setup must never invoke login/logout/auth-status commands. A centrally managed CLI may intentionally reject those commands while normal inference succeeds. If the inference probe fails, show the provider's safe bounded error, offer another provider, and return nonzero before changes if no provider succeeds.
+Setup must never invoke login/logout/auth-status commands. A centrally managed CLI may intentionally reject those commands while normal inference succeeds. If the inference probe fails during interactive setup, show the provider's safe bounded error and let the user leave setup open while fixing the issue, then retry the same selected provider in place. Declining that retry returns to the provider menu unless an explicit provider was requested. Non-interactive setup, cancellation, or finishing without a ready provider must return nonzero before any changes.
 
 Do not print detailed diagnostics for unselected providers. The provider question itself is required even when exactly one provider is currently usable.
 

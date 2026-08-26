@@ -1152,20 +1152,34 @@ func configureSetupProvider(ctx context.Context, rt *bootstrap.Runtime, cfg *con
 			}
 		}
 
-		ready, diagnostic, code := activateSetupProvider(ctx, *rt, selected, diagnostics[selected], explicit != "", ui)
-		diagnostics[selected] = diagnostic
-		if code != 0 || ready {
-			return selected, ready, code
-		}
-		if !ui.interactive || yes {
-			return setupProviderRequired(ui)
-		}
-		again, err := ui.askYesNo("Choose a different provider?", true)
-		if err != nil {
-			return "", false, 130
-		}
-		if !again {
-			return setupProviderRequired(ui)
+		for {
+			stopIfUnavailable := explicit != "" && (!ui.interactive || yes)
+			ready, diagnostic, code := activateSetupProvider(ctx, *rt, selected, diagnostics[selected], stopIfUnavailable, ui)
+			diagnostics[selected] = diagnostic
+			if code != 0 || ready {
+				return selected, ready, code
+			}
+			if !ui.interactive || yes {
+				return setupProviderRequired(ui)
+			}
+
+			ui.note("Fix the issue above, then return here to retry " + setupProviderName(selected) + ".")
+			if explicit == "" {
+				ui.note("Answer no to return to the provider list, or press Ctrl-C to cancel setup.")
+			} else {
+				ui.note("Answer no to stop setup, or press Ctrl-C to cancel.")
+			}
+			retry, err := ui.askYesNo("Retry "+setupProviderName(selected)+"?", true)
+			if err != nil {
+				return "", false, 130
+			}
+			if retry {
+				continue
+			}
+			if explicit != "" {
+				return setupProviderRequired(ui)
+			}
+			break
 		}
 	}
 }

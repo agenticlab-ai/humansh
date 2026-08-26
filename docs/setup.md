@@ -68,7 +68,7 @@ Interactive setup always shows a compact four-provider menu and asks what to use
 
 The menu uses non-inference discovery: it checks whether each CLI executable exists without calling optional login, status, version, or help commands. After you choose Codex, Claude Code, or Cursor, setup discloses and sends one fixed minimal prompt through a fresh isolated subprocess. That live check may consume a small amount of provider quota.
 
-Authentication belongs to the selected CLI distribution. Humansh neither infers its billing mode nor starts a login flow. This supports centrally managed corporate distributions whose inference command works while login subcommands are intentionally disabled. If the probe fails, setup shows the provider's bounded, redacted error text and lets you choose another provider.
+Authentication belongs to the selected CLI distribution. Humansh neither infers its billing mode nor starts a login flow. This supports centrally managed corporate distributions whose inference command works while login subcommands are intentionally disabled. If the probe fails, setup shows the provider's bounded, redacted error text and waits while you fix the issue. Press Enter to retry the same provider in place, or answer no to return to the provider list.
 
 If several Claude or Cursor CLI installations are present in `PATH`, setup lets you keep automatic selection or pin one exact executable. Shell aliases and the Cursor editor launcher are intentionally not used.
 
