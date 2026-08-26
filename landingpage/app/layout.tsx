@@ -29,20 +29,6 @@ export async function generateMetadata(): Promise<Metadata> {
     description,
     metadataBase: new URL(origin),
     alternates: { canonical: origin },
-    icons: {
-      icon: [
-        { url: "/favicon-32.png", sizes: "32x32", type: "image/png" },
-        { url: "/favicon.png", sizes: "512x512", type: "image/png" },
-      ],
-      shortcut: "/favicon-32.png",
-      apple: [
-        {
-          url: "/apple-touch-icon.png",
-          sizes: "180x180",
-          type: "image/png",
-        },
-      ],
-    },
     openGraph: {
       title: "HumanSH — Forgot the command? Stay in the terminal.",
       description:
@@ -75,6 +61,27 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <link rel="shortcut icon" href="/favicon.ico?v=2" />
+        <link
+          rel="icon"
+          href="/favicon-32.png?v=2"
+          type="image/png"
+          sizes="32x32"
+        />
+        <link
+          rel="icon"
+          href="/favicon.png?v=2"
+          type="image/png"
+          sizes="512x512"
+        />
+        <link
+          rel="apple-touch-icon"
+          href="/apple-touch-icon.png?v=2"
+          type="image/png"
+          sizes="180x180"
+        />
+      </head>
       <body className={inter.variable}>
         {children}
         <WebsiteAnalyticsListener />

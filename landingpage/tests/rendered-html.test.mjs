@@ -42,14 +42,27 @@ test("server-renders the HumanSH landing page", async () => {
 
   const html = await response.text();
   const visibleHtml = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+  const headMatch = html.match(/<head>([\s\S]*?)<\/head>/i);
+  assert.ok(headMatch, "expected a document head");
+  const headHtml = headMatch[1];
+  const afterHeadHtml = html.slice((headMatch.index ?? 0) + headMatch[0].length);
+
   assert.match(html, /<title>HumanSH — Stay in your terminal<\/title>/i);
   assert.match(
-    html,
-    /<link[^>]+rel="icon"[^>]+href="\/favicon-32\.png"[^>]*>/i,
+    headHtml,
+    /<link[^>]+rel="shortcut icon"[^>]+href="\/favicon\.ico\?v=2"[^>]*>/i,
   );
   assert.match(
-    html,
-    /<link[^>]+rel="apple-touch-icon"[^>]+href="\/apple-touch-icon\.png"[^>]*>/i,
+    headHtml,
+    /<link[^>]+rel="icon"[^>]+href="\/favicon-32\.png\?v=2"[^>]*>/i,
+  );
+  assert.match(
+    headHtml,
+    /<link[^>]+rel="apple-touch-icon"[^>]+href="\/apple-touch-icon\.png\?v=2"[^>]*>/i,
+  );
+  assert.doesNotMatch(
+    afterHeadHtml,
+    /<link[^>]+(?:favicon|apple-touch-icon)[^>]*>/i,
   );
   assert.match(visibleHtml, /Forgot the command\? Stay in the terminal\./);
   assert.match(visibleHtml, /curl -fsSL https:\/\/humansh\.com\/install \| bash/);
@@ -86,6 +99,11 @@ test("server-renders the HumanSH landing page", async () => {
   );
   assert.equal(favicon.readUInt32BE(16), 32);
   assert.equal(favicon.readUInt32BE(20), 32);
+
+  const fallbackFavicon = await readFile(
+    new URL("../dist/client/favicon.ico", import.meta.url),
+  );
+  assert.deepEqual([...fallbackFavicon.subarray(0, 8)], [0, 0, 1, 0, 1, 0, 32, 32]);
 });
 
 test("redirects the branded install URL to the canonical installer", async () => {
