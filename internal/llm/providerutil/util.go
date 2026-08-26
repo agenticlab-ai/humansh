@@ -7,15 +7,109 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
 	usererr "github.com/agenticlab-ai/humansh/internal/errors"
 	"github.com/agenticlab-ai/humansh/internal/exitcode"
 	"github.com/agenticlab-ai/humansh/internal/llm"
+	"github.com/agenticlab-ai/humansh/internal/processrunner"
 )
+
+const (
+	ProbeMarker = "HUMANSH_READY"
+	ProbePrompt = "Reply with exactly HUMANSH_READY and nothing else. Do not use tools or inspect external state."
+)
+
+// ProbeDiagnostic converts one minimal CLI inference into the common
+// diagnostic contract. The prompt is a Humansh-owned constant, so bounded
+// stdout and stderr can be safely reflected after credential/control redaction.
+func ProbeDiagnostic(base llm.Diagnostic, provider llm.ProviderID, timeout time.Duration, result processrunner.Result, runErr error) llm.Diagnostic {
+	base.Available = false
+	base.Authenticated = false
+	base.AuthMode = "provider_managed"
+	if processrunner.IsNotFound(runErr) {
+		base.LiveCheck = false
+		base.Installed = false
+		base.Configured = false
+		base.Message = provider.Label() + " is not installed"
+		switch provider {
+		case llm.Codex:
+			base.NextSteps = []llm.DiagnosticAction{{Description: "Install Codex", Command: "curl -fsSL https://chatgpt.com/codex/install.sh | sh"}}
+		case llm.Claude:
+			base.NextSteps = []llm.DiagnosticAction{{Description: "Install Claude Code", Command: "curl -fsSL https://claude.ai/install.sh | bash"}}
+		case llm.Cursor:
+			base.NextSteps = []llm.DiagnosticAction{{Description: "Install Cursor CLI", Command: "curl https://cursor.com/install -fsS | bash"}}
+		}
+		return base
+	}
+	base.LiveCheck = true
+	if runErr != nil {
+		detail := append(append(append([]byte(nil), result.Stderr...), '\n'), result.Stdout...)
+		mapped := MapCLIError(provider, timeout, detail, runErr)
+		if typed, ok := usererr.As(mapped); ok {
+			if safe := SafeExternalText(result.Stderr, result.Stdout); safe != "" {
+				typed.Summary = provider.Label() + " reported: " + safe + "\nNothing was changed or executed."
+			}
+		}
+		return DiagnosticFromError(base, mapped)
+	}
+	if strings.TrimSpace(string(result.Stdout)) != ProbeMarker {
+		detail := SafeExternalText(result.Stdout, result.Stderr)
+		base.Message = provider.Label() + " returned an unexpected response to its live check"
+		if detail != "" {
+			base.Message += ": " + detail
+		}
+		base.NextSteps = []llm.DiagnosticAction{{Description: "Run a full translation test", Command: "humansh provider test " + string(provider)}}
+		return base
+	}
+	base.Installed = true
+	base.Configured = true
+	base.Authenticated = true
+	base.Available = true
+	base.Capabilities = []string{"minimal-inference"}
+	base.Message = provider.Label() + " responded to a minimal inference prompt"
+	base.NextSteps = nil
+	return base
+}
+
+// DiagnosticFromError keeps a typed provider error useful in setup and other
+// diagnostic UIs without exposing its unredacted debug cause.
+func DiagnosticFromError(base llm.Diagnostic, err error) llm.Diagnostic {
+	base.Available = false
+	base.Authenticated = false
+	if typed, ok := usererr.As(err); ok {
+		base.Message = typed.Title
+		if typed.Summary != "" && typed.Summary != typed.Title {
+			base.Message += " " + strings.ReplaceAll(typed.Summary, "\n", " ")
+		}
+		base.NextSteps = make([]llm.DiagnosticAction, 0, len(typed.Fixes))
+		for _, fix := range typed.Fixes {
+			base.NextSteps = append(base.NextSteps, llm.DiagnosticAction{Description: fix.Description, Command: fix.Command})
+		}
+		return base
+	}
+	base.Message = SafeExternalText([]byte(err.Error()))
+	return base
+}
+
+// SafeExternalText renders bounded provider-owned diagnostics. It is intended
+// only for output known not to contain the user's translation request.
+func SafeExternalText(values ...[]byte) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		if text := strings.Join(strings.Fields(usererr.RedactDebug(string(value))), " "); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	text := strings.Join(parts, "; ")
+	const maxRunes = 400
+	runes := []rune(text)
+	if len(runes) > maxRunes {
+		text = string(runes[:maxRunes]) + "…"
+	}
+	return text
+}
 
 func DecodeResponse(data []byte) (llm.TranslationResponse, error) {
 	if err := RejectDuplicateJSONKeys(data); err != nil {
@@ -113,7 +207,7 @@ func Missing(provider, install, login string) error {
 }
 
 func Auth(provider, repair, check string, cause error) error {
-	return usererr.WithExit(exitcode.ProviderAuth, "provider_auth", provider+" is not logged in with the required subscription authentication.", "Nothing was changed or executed.", false, cause,
+	return usererr.WithExit(exitcode.ProviderAuth, "provider_auth", provider+" could not use its provider-managed authentication.", "Nothing was changed or executed.", false, cause,
 		usererr.Fix{Description: "Fix", Command: repair}, usererr.Fix{Description: "Check", Command: check})
 }
 
@@ -175,15 +269,15 @@ func Quota(provider string, cause error) error {
 	fixes := []usererr.Fix{{Description: "Inspect provider status with", Command: "humansh provider list"}}
 	switch provider {
 	case "Codex":
-		fixes = append(fixes, usererr.Fix{Description: "Or explicitly switch subscription provider with", Command: "humansh provider use claude"}, usererr.Fix{Description: "Or", Command: "humansh provider use cursor"}, usererr.Fix{Description: "Or explicitly configure metered OpenRouter with", Command: "humansh provider configure openrouter --model provider/model"})
+		fixes = append(fixes, usererr.Fix{Description: "Or explicitly switch CLI provider with", Command: "humansh provider use claude"}, usererr.Fix{Description: "Or", Command: "humansh provider use cursor"}, usererr.Fix{Description: "Or explicitly configure metered OpenRouter with", Command: "humansh provider configure openrouter --model provider/model"})
 	case "Claude Code":
-		fixes = append(fixes, usererr.Fix{Description: "Or explicitly switch subscription provider with", Command: "humansh provider use codex"}, usererr.Fix{Description: "Or", Command: "humansh provider use cursor"}, usererr.Fix{Description: "Or explicitly configure metered OpenRouter with", Command: "humansh provider configure openrouter --model provider/model"})
+		fixes = append(fixes, usererr.Fix{Description: "Or explicitly switch CLI provider with", Command: "humansh provider use codex"}, usererr.Fix{Description: "Or", Command: "humansh provider use cursor"}, usererr.Fix{Description: "Or explicitly configure metered OpenRouter with", Command: "humansh provider configure openrouter --model provider/model"})
 	case "Cursor CLI":
-		fixes = append(fixes, usererr.Fix{Description: "Or explicitly switch subscription provider with", Command: "humansh provider use codex"}, usererr.Fix{Description: "Or", Command: "humansh provider use claude"}, usererr.Fix{Description: "Or explicitly configure metered OpenRouter with", Command: "humansh provider configure openrouter --model provider/model"})
+		fixes = append(fixes, usererr.Fix{Description: "Or explicitly switch CLI provider with", Command: "humansh provider use codex"}, usererr.Fix{Description: "Or", Command: "humansh provider use claude"}, usererr.Fix{Description: "Or explicitly configure metered OpenRouter with", Command: "humansh provider configure openrouter --model provider/model"})
 	case "OpenRouter":
-		fixes = append(fixes, usererr.Fix{Description: "Or explicitly switch subscription provider with", Command: "humansh provider use codex"}, usererr.Fix{Description: "Or", Command: "humansh provider use claude"}, usererr.Fix{Description: "Or", Command: "humansh provider use cursor"})
+		fixes = append(fixes, usererr.Fix{Description: "Or explicitly switch CLI provider with", Command: "humansh provider use codex"}, usererr.Fix{Description: "Or", Command: "humansh provider use claude"}, usererr.Fix{Description: "Or", Command: "humansh provider use cursor"})
 	}
-	return usererr.WithExit(exitcode.ProviderQuota, "provider_quota", provider+" quota, credits, or rate limit is unavailable.", "Nothing was changed or executed; no paid fallback was attempted.", true, cause,
+	return usererr.WithExit(exitcode.ProviderQuota, "provider_quota", provider+" quota, credits, or rate limit is unavailable.", "Nothing was changed or executed; no automatic fallback was attempted.", true, cause,
 		fixes...)
 }
 
@@ -201,57 +295,27 @@ func MapCLIError(provider llm.ProviderID, timeout time.Duration, stderr []byte, 
 	}
 	label := provider.Label()
 	text := strings.ToLower(string(stderr))
+	var mapped error
 	switch {
 	case strings.Contains(text, "rate limit"), strings.Contains(text, "usage limit"), strings.Contains(text, "quota"), strings.Contains(text, "billing"):
-		return Quota(label, cause)
+		mapped = Quota(label, cause)
 	case strings.Contains(text, "login"), strings.Contains(text, "auth"), strings.Contains(text, "unauthorized"):
-		return Auth(label, "humansh provider test", "humansh doctor", cause)
+		mapped = Auth(label, "humansh provider test "+string(provider), "humansh doctor --provider "+string(provider), cause)
 	case strings.Contains(text, "model not found"), strings.Contains(text, "unknown model"), strings.Contains(text, "invalid model"):
-		return usererr.WithExit(exitcode.ProviderUnavailable, "provider_model", label+" rejected the configured model.", "Nothing was changed or executed.", false, cause, usererr.Fix{Description: "Choose a supported model, then run", Command: "humansh provider test"})
+		mapped = usererr.WithExit(exitcode.ProviderUnavailable, "provider_model", label+" rejected the configured model.", "Nothing was changed or executed.", false, cause, usererr.Fix{Description: "Choose a supported model, then run", Command: "humansh provider test " + string(provider)})
 	case strings.Contains(text, "organization disallowed"), strings.Contains(text, "workspace denied"), strings.Contains(text, "permission denied"), strings.Contains(text, "forbidden"):
-		return usererr.WithExit(exitcode.ProviderUnavailable, "provider_access_denied", label+" account, organization, or workspace denied access.", "Nothing was changed or executed.", false, cause, usererr.Fix{Description: "Check account access, then run", Command: "humansh provider test"})
+		mapped = usererr.WithExit(exitcode.ProviderUnavailable, "provider_access_denied", label+" account, organization, or workspace denied access.", "Nothing was changed or executed.", false, cause, usererr.Fix{Description: "Check account access, then run", Command: "humansh provider test " + string(provider)})
 	case strings.Contains(text, "unknown option"), strings.Contains(text, "unexpected argument"), strings.Contains(text, "unknown field"), strings.Contains(text, "unknown key"):
-		return usererr.WithExit(exitcode.ProviderUnavailable, "provider_too_old", label+" is too old for safe structured translation.", "Nothing was changed or executed.", false, cause, usererr.Fix{Description: "Update the provider CLI, then run", Command: "humansh doctor"})
+		mapped = usererr.WithExit(exitcode.ProviderUnavailable, "provider_too_old", label+" does not support Humansh's structured translation invocation.", "Nothing was changed or executed.", false, cause, usererr.Fix{Description: "Update or reconfigure the provider CLI, then run", Command: "humansh provider test " + string(provider)})
 	default:
-		return Temporary(label, cause)
+		mapped = Temporary(label, cause)
 	}
-}
-
-// versionPattern captures the first dotted numeric version in a CLI's version
-// output, for example "codex-cli-exec 0.149.0" or "2.1.238 (Claude Code)".
-var versionPattern = regexp.MustCompile(`\b(\d+)\.(\d+)(?:\.(\d+))?\b`)
-
-// VersionFloor reports whether reported is a recognisable version that is at
-// least minimum. Both results matter to callers:
-//
-//   - meets is true when the version parsed and is greater than or equal to the
-//     floor, so "update the CLI" is never suggested to somebody already newer.
-//   - parsed is false when no version could be read at all. Callers then fall
-//     back to capability probes alone, because build_with_ai.md Section 10.1
-//     requires version gating only where no direct probe exists, and Section 28
-//     requires reporting a version mismatch through doctor rather than silently
-//     refusing to run.
-//
-// minimum is given as {major, minor, patch}.
-func VersionFloor(reported string, minimum [3]int) (meets bool, parsed bool) {
-	match := versionPattern.FindStringSubmatch(reported)
-	if match == nil {
-		return false, false
-	}
-	var found [3]int
-	for index := range found {
-		if value := match[index+1]; value != "" {
-			number, err := strconv.Atoi(value)
-			if err != nil {
-				return false, false
+	if typed, ok := usererr.As(mapped); ok {
+		for index := range typed.Fixes {
+			if typed.Fixes[index].Command == "humansh provider test" {
+				typed.Fixes[index].Command += " " + string(provider)
 			}
-			found[index] = number
 		}
 	}
-	for index := range found {
-		if found[index] != minimum[index] {
-			return found[index] > minimum[index], true
-		}
-	}
-	return true, true
+	return mapped
 }

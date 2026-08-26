@@ -28,7 +28,6 @@ type Paths struct {
 	Binary          string
 	CacheDir        string
 	Credentials     string
-	CodexAuthRecord string
 	CodexConfigFile string
 }
 
@@ -66,7 +65,6 @@ func ResolvePaths() (Paths, error) {
 		Binary:          filepath.Join(home, ".local", "bin", "humansh"),
 		CacheDir:        filepath.Join(cacheBase, "humansh"),
 		Credentials:     filepath.Join(configDir, "credentials.json"),
-		CodexAuthRecord: filepath.Join(codexHome, "auth.json"),
 		CodexConfigFile: filepath.Join(codexHome, "config.toml"),
 	}, nil
 }
@@ -389,7 +387,6 @@ force_literal_binding = %s
 [providers.codex]
 model = %s
 auth_mode = %s
-subscription_auth_confirmed = %t
 
 [providers.claude]
 binary = %s
@@ -414,7 +411,7 @@ order = [%s]
 allow_metered_openrouter = %t
 `, c.Version, quote(string(c.Provider)), int(c.Timeout/time.Second), quote(c.AmbiguityPolicy), quote(c.WorkingContext),
 		quote(string(c.Shell.Name)), quote(c.Shell.Protocol), c.Shell.SmartEnter, quote(c.Shell.ClearLineBinding), quote(c.Shell.ForceTranslateBinding), quote(c.Shell.ForceLiteralBinding),
-		quote(c.Codex.Model), quote(c.Codex.AuthMode), c.Codex.SubscriptionAuthConfirmed,
+		quote(c.Codex.Model), quote(c.Codex.AuthMode),
 		quote(c.Claude.Binary), quote(c.Claude.Model), quote(c.Claude.AuthMode),
 		quote(c.Cursor.Binary), quote(c.Cursor.Model), quote(c.Cursor.AuthMode),
 		quote(c.OpenRouter.Model), quote(c.OpenRouter.BaseURL), quote(c.OpenRouter.CredentialRef), c.OpenRouter.StructuredOutputProven, quote(c.OpenRouter.StructuredOutputModel),
@@ -479,7 +476,10 @@ func parseConfig(data string) (RuntimeConfig, error) {
 	if value, ok := values["providers.codex.auth_mode"]; ok {
 		c.Codex.AuthMode = value.scalar
 	}
-	if c.Codex.SubscriptionAuthConfirmed, err = getBool(values, "providers.codex.subscription_auth_confirmed", false); err != nil {
+	// Version-one configs may contain the retired confirmation bit. Parse it so
+	// malformed legacy values still fail closed, but never use it for provider
+	// readiness: the Codex distribution owns authentication.
+	if _, err = getBool(values, "providers.codex.subscription_auth_confirmed", false); err != nil {
 		return c, err
 	}
 	if value, ok := values["providers.claude.model"]; ok {
@@ -499,6 +499,17 @@ func parseConfig(data string) (RuntimeConfig, error) {
 	}
 	if value, ok := values["providers.cursor.auth_mode"]; ok {
 		c.Cursor.AuthMode = value.scalar
+	}
+	// Normalize the original v1 auth labels. They described assumptions Humansh
+	// can no longer make about centrally managed CLI distributions.
+	if c.Codex.AuthMode == "subscription" {
+		c.Codex.AuthMode = "provider_managed"
+	}
+	if c.Claude.AuthMode == "subscription" {
+		c.Claude.AuthMode = "provider_managed"
+	}
+	if c.Cursor.AuthMode == "account" {
+		c.Cursor.AuthMode = "provider_managed"
 	}
 	if value, ok := values["providers.openrouter.model"]; ok {
 		c.OpenRouter.Model = value.scalar

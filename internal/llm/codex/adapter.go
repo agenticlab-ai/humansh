@@ -2,10 +2,11 @@ package codex
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -20,11 +21,9 @@ import (
 )
 
 type Config struct {
-	Binary                    string
-	Model                     string
-	Timeout                   time.Duration
-	SubscriptionAuthConfirmed bool
-	AuthRecordPath            string
+	Binary  string
+	Model   string
+	Timeout time.Duration
 }
 
 type Adapter struct {
@@ -34,110 +33,71 @@ type Adapter struct {
 	verifyIsolation  func(string) error
 }
 
-// minimumVersion is the oldest `codex exec` release whose isolation config keys
-// humansh has verified. It is a floor, not a pin: Codex ships frequently (0.148
-// to 0.149 inside a single day), so pinning exact releases would disable the
-// provider within days and tell the user to update a CLI that is already newer.
-// Capability probing remains the real gate.
-var minimumVersion = [3]int{0, 148, 0}
-
-var requiredHelpOptions = []string{
-	"--ephemeral", "--skip-git-repo-check", "--sandbox", "--ignore-user-config", "--ignore-rules",
-	"--strict-config", "--color", "--output-schema", "--output-last-message", "--cd",
-}
-
-var observedCapabilities = []string{
-	"qualified-isolation-config", "strict-structured-output", "final-message-file", "read-only-sandbox", "tools-disabled",
-}
-
 func (Adapter) ID() llm.ProviderID { return llm.Codex }
 
-func (a Adapter) Diagnose(ctx context.Context) llm.Diagnostic {
-	diagnosticCtx, cancel := context.WithTimeout(ctx, a.timeout())
-	defer cancel()
-	tempDir, err := os.MkdirTemp("", "humansh-codex-diagnose-*")
+func (a Adapter) Diagnose(context.Context) llm.Diagnostic {
+	executable, found := a.discoverBinary()
+	if !found {
+		return llm.Diagnostic{
+			Configured: a.Config.Binary != "", AuthMode: "provider_managed", Message: "Codex CLI is not installed",
+			NextSteps: []llm.DiagnosticAction{{Description: "Install Codex", Command: "curl -fsSL https://chatgpt.com/codex/install.sh | sh"}},
+		}
+	}
+	return llm.Diagnostic{
+		Installed: true, Configured: true, AuthMode: "provider_managed", Executable: executable,
+		Message:   "Codex CLI is installed; live inference has not been checked",
+		NextSteps: []llm.DiagnosticAction{{Description: "Run a live provider check", Command: "humansh provider test codex"}},
+	}
+}
+
+func (a Adapter) Probe(ctx context.Context) llm.Diagnostic {
+	base := a.Diagnose(ctx)
+	if !base.Installed && a.Runner == nil {
+		return base
+	}
+	tempDir, err := os.MkdirTemp("", "humansh-codex-probe-*")
 	if err != nil {
-		return llm.Diagnostic{Message: "Codex diagnostic isolation could not be created"}
+		return providerutil.DiagnosticFromError(base, providerutil.Temporary("Codex", err))
 	}
 	defer os.RemoveAll(tempDir)
 	if err := os.Chmod(tempDir, 0o700); err != nil {
-		return llm.Diagnostic{Message: "Codex diagnostic isolation could not be secured"}
+		return providerutil.DiagnosticFromError(base, providerutil.Temporary("Codex", err))
 	}
-	binary := a.binary()
-	runner := a.runner()
-	env := processrunner.MinimalEnv(tempDir, nil)
-	version, versionErr := runner.Run(diagnosticCtx, processrunner.Spec{Path: binary, Args: []string{"exec", "--version"}, Dir: tempDir, Env: env, MaxStdout: 4096, MaxStderr: 4096})
-	if processrunner.IsNotFound(versionErr) {
-		return llm.Diagnostic{Message: "Codex CLI not installed"}
+	if err := prepareProbeRepository(tempDir); err != nil {
+		return providerutil.DiagnosticFromError(base, providerutil.Temporary("Codex", err))
 	}
-	reportedVersion := strings.TrimSpace(string(version.Stdout))
-	help, helpErr := runner.Run(diagnosticCtx, processrunner.Spec{Path: binary, Args: []string{"exec", "--help"}, Dir: tempDir, Env: env, MaxStdout: 64 << 10, MaxStderr: 64 << 10})
-	probesOK := versionErr == nil && helpErr == nil && containsAll(string(help.Stdout)+"\n"+string(help.Stderr), requiredHelpOptions)
-	meetsFloor, versionParsed := providerutil.VersionFloor(reportedVersion, minimumVersion)
-	// An unreadable version string must not disable a CLI whose capabilities all
-	// probe correctly; doctor reports the unknown version instead.
-	capabilitiesOK := probesOK && (meetsFloor || !versionParsed)
-	status, err := runner.Run(diagnosticCtx, processrunner.Spec{Path: binary, Args: []string{"login", "status"}, Dir: tempDir, Env: env, MaxStdout: 64 << 10, MaxStderr: 64 << 10})
-	auth := parseStatus(string(status.Stdout) + "\n" + string(status.Stderr))
-	record := a.inspectAuthRecord()
-	authenticated := err == nil && auth == "chatgpt" && record == "chatgpt"
-	effectiveAuth := auth
-	if auth == "api_key" || record == "api_key" {
-		effectiveAuth = "api_key"
-	}
-	message := ""
-	switch {
-	case !capabilitiesOK && probesOK && versionParsed && !meetsFloor:
-		message = "Codex is older than the minimum verified release 0.148.0; update Codex"
-	case !capabilitiesOK:
-		message = "required non-interactive isolation capabilities are missing from this Codex build; update Codex"
-	case authenticated && !versionParsed:
-		message = "ChatGPT subscription authentication confirmed; capabilities verified by probe because the reported version could not be read"
-	case authenticated:
-		message = "ChatGPT subscription authentication confirmed"
-	case effectiveAuth == "api_key":
-		message = "usage-based API-key authentication is active; ChatGPT subscription authentication is required"
-	case auth == "logged_out":
-		message = "login required; choose Sign in with ChatGPT"
-	case err != nil:
-		message = "Codex login status check failed"
-	case auth == "unknown" && record == "chatgpt":
-		message = "status wording unrecognized; local auth record corroborates ChatGPT, but explicit subscription confirmation is required"
-	case auth == "chatgpt" && record != "chatgpt":
-		message = "status reports ChatGPT, but the local auth record could not corroborate it"
-	default:
-		message = "subscription authentication could not be confirmed"
-	}
-	if !authenticated && auth == "unknown" && record == "chatgpt" && a.Config.SubscriptionAuthConfirmed {
-		authenticated = true
-		if capabilitiesOK {
-			message = "status wording unrecognized; using explicit subscription confirmation"
+	probeCtx, cancel := context.WithTimeout(ctx, a.timeout())
+	defer cancel()
+	// Codex normally requires a Git worktree. Supplying an empty, private
+	// worktree lets the live check exercise the bare `codex exec <prompt>`
+	// surface without depending on an optional repository-check flag.
+	result, runErr := a.runner().Run(probeCtx, processrunner.Spec{
+		Path: a.binary(), Args: []string{"exec", providerutil.ProbePrompt}, Dir: tempDir,
+		Env: processrunner.MinimalEnv(tempDir, nil), MaxStdout: 64 << 10, MaxStderr: 64 << 10,
+	})
+	return providerutil.ProbeDiagnostic(base, llm.Codex, a.timeout(), result, runErr)
+}
+
+func prepareProbeRepository(dir string) error {
+	gitDir := filepath.Join(dir, ".git")
+	for _, relative := range []string{"objects", filepath.Join("refs", "heads"), filepath.Join("refs", "tags")} {
+		if err := os.MkdirAll(filepath.Join(gitDir, relative), 0o700); err != nil {
+			return fmt.Errorf("prepare private probe worktree: %w", err)
 		}
 	}
-	capabilities := []string(nil)
-	if capabilitiesOK {
-		capabilities = append(capabilities, observedCapabilities...)
+	files := map[string]string{
+		"HEAD":   "ref: refs/heads/main\n",
+		"config": "[core]\n\trepositoryformatversion = 0\n\tbare = false\n",
 	}
-	return llm.Diagnostic{Installed: true, Configured: true, Authenticated: authenticated, Available: authenticated && capabilitiesOK, AuthMode: effectiveAuth, Version: reportedVersion, Capabilities: capabilities, Message: message}
+	for name, contents := range files {
+		if err := os.WriteFile(filepath.Join(gitDir, name), []byte(contents), 0o600); err != nil {
+			return fmt.Errorf("prepare private probe worktree: %w", err)
+		}
+	}
+	return nil
 }
 
 func (a Adapter) Translate(ctx context.Context, request llm.TranslationRequest) (llm.TranslationResponse, error) {
-	diagnostic := a.Diagnose(ctx)
-	if !diagnostic.Available {
-		switch {
-		case !diagnostic.Installed:
-			return llm.TranslationResponse{}, providerutil.Missing("Codex CLI", "curl -fsSL https://chatgpt.com/codex/install.sh | sh", "codex login")
-		case diagnostic.Authenticated && len(diagnostic.Capabilities) == 0:
-			return llm.TranslationResponse{}, usererr.WithExit(exitcode.ProviderUnavailable, "codex_capabilities", "Codex is not qualified for safe structured translation.", "Nothing was changed or executed.", false, nil,
-				usererr.Fix{Description: "Update Codex, then check", Command: "humansh doctor"})
-		case diagnostic.AuthMode == "api_key":
-			return llm.TranslationResponse{}, usererr.WithExit(exitcode.ProviderAuth, "codex_metered_auth", "Codex is signed in with usage-based API-key authentication, not a ChatGPT subscription.", "Nothing was changed or executed.", false, nil,
-				usererr.Fix{Description: "Sign out, then choose Sign in with ChatGPT", Command: "codex logout && codex login"},
-				usererr.Fix{Description: "Or explicitly use metered OpenRouter", Command: "humansh provider use openrouter"})
-		default:
-			return llm.TranslationResponse{}, providerutil.Auth("Codex", "codex login", "codex login status", nil)
-		}
-	}
 	tempDir, err := os.MkdirTemp("", "humansh-codex-*")
 	if err != nil {
 		return llm.TranslationResponse{}, providerutil.Temporary("Codex", err)
@@ -163,7 +123,7 @@ func (a Adapter) Translate(ctx context.Context, request llm.TranslationRequest) 
 		return llm.TranslationResponse{}, providerutil.Malformed("encode request", err)
 	}
 	args := []string{"exec", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--ignore-user-config", "--ignore-rules", "--strict-config", "--color", "never",
-		"-c", `approval_policy="never"`, "-c", `forced_login_method="chatgpt"`, "-c", `web_search="disabled"`, "-c", "project_doc_max_bytes=0",
+		"-c", `approval_policy="never"`, "-c", `web_search="disabled"`, "-c", "project_doc_max_bytes=0",
 		"-c", "agents.enabled=false", "-c", "features.multi_agent=false", "-c", "features.apps=false", "-c", "features.shell_tool=false", "-c", "features.unified_exec=false",
 		"-c", "features.shell_snapshot=false", "-c", "features.hooks=false", "-c", "features.skill_mcp_dependency_install=false", "-c", "features.goals=false",
 		"-c", "features.memories=false", "-c", `history.persistence="none"`, "-c", "analytics.enabled=false", "-c", "allow_login_shell=false",
@@ -182,7 +142,7 @@ func (a Adapter) Translate(ctx context.Context, request llm.TranslationRequest) 
 	}
 	if runErr != nil {
 		if processrunner.IsNotFound(runErr) {
-			return llm.TranslationResponse{}, providerutil.Missing("Codex CLI", "", "codex login")
+			return llm.TranslationResponse{}, providerutil.Missing("Codex CLI", "curl -fsSL https://chatgpt.com/codex/install.sh | sh", "")
 		}
 		if processrunner.IsOutputLimit(runErr) {
 			return llm.TranslationResponse{}, providerutil.Malformed("Codex output exceeded the capture limit", runErr)
@@ -227,94 +187,27 @@ func (a Adapter) binary() string {
 	}
 	return "codex"
 }
+
+func (a Adapter) discoverBinary() (string, bool) {
+	if a.Runner != nil {
+		return "", true
+	}
+	resolved, err := exec.LookPath(a.binary())
+	if err != nil {
+		return "", false
+	}
+	if filepath.IsAbs(resolved) {
+		return resolved, true
+	}
+	absolute, err := filepath.Abs(resolved)
+	if err != nil {
+		return resolved, true
+	}
+	return absolute, true
+}
 func (a Adapter) timeout() time.Duration {
 	if a.Config.Timeout > 0 {
 		return a.Config.Timeout
 	}
 	return 20 * time.Second
-}
-
-func containsAll(value string, required []string) bool {
-	for _, item := range required {
-		if !strings.Contains(value, item) {
-			return false
-		}
-	}
-	return true
-}
-
-func parseStatus(output string) string {
-	chatGPT, apiKey, loggedOut := false, false, false
-	for _, line := range strings.Split(output, "\n") {
-		switch strings.ToLower(strings.TrimSpace(line)) {
-		case "logged in using chatgpt", "signed in with chatgpt":
-			chatGPT = true
-		case "logged in using api key", "signed in with api key":
-			apiKey = true
-		case "not logged in", "logged out":
-			loggedOut = true
-		}
-	}
-	switch {
-	case apiKey:
-		return "api_key"
-	case loggedOut:
-		return "logged_out"
-	case chatGPT:
-		return "chatgpt"
-	default:
-		return "unknown"
-	}
-}
-
-func (a Adapter) inspectAuthRecord() string {
-	path := a.Config.AuthRecordPath
-	if path == "" {
-		return "unknown"
-	}
-	data, err := os.ReadFile(path)
-	if err != nil || len(data) > 1<<20 {
-		return "unknown"
-	}
-	var value any
-	if json.Unmarshal(data, &value) != nil {
-		return "unknown"
-	}
-	var chatGPT, apiKey bool
-	var walk func(string, any)
-	walk = func(key string, item any) {
-		switch typed := item.(type) {
-		case map[string]any:
-			for childKey, child := range typed {
-				walk(strings.ToLower(childKey), child)
-			}
-		case []any:
-			for _, child := range typed {
-				walk(key, child)
-			}
-		case string:
-			text := strings.ToLower(strings.TrimSpace(typed))
-			if text == "" || text == "none" || text == "null" {
-				return
-			}
-			switch key {
-			case "api_key", "apikey", "openai_api_key", "codex_api_key":
-				apiKey = true
-			}
-			if text == "api_key" || text == "apikey" {
-				apiKey = true
-			}
-			if text == "chatgpt" || key == "access_token" || key == "id_token" || key == "refresh_token" {
-				chatGPT = true
-			}
-		}
-	}
-	walk("", value)
-	if apiKey {
-		return "api_key"
-	}
-	if chatGPT {
-		return "chatgpt"
-	}
-	return "unknown"
 }

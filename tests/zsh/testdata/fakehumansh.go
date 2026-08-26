@@ -80,7 +80,7 @@ func main() {
 		fmt.Print("print -r -- OVERRIDE_GENERATED")
 		os.Exit(10)
 	case "auth please":
-		fmt.Fprint(os.Stderr, "humansh: provider login required. Fix: run `codex login`.")
+		fmt.Fprint(os.Stderr, "humansh: provider-managed authentication failed. Check: run `humansh provider test codex`.")
 		os.Exit(22)
 	case "unsupported please":
 		fmt.Fprint(os.Stderr, "This request cannot be represented as one shell command.")

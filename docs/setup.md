@@ -60,19 +60,19 @@ Slow discovery and provider checks show an in-place loader on a terminal. Redire
 
 Before writing anything, setup shows shell modes, provider and model, directory-context privacy, timeout, and shortcuts. At a shortcut prompt, type a readable value such as `Ctrl-G`, `Ctrl-X Ctrl-T`, or `Esc t`.
 
-Setup preserves startup-file symlinks, applies all shell changes transactionally, can be cancelled without changes, and refuses to apply a stale reviewed patch.
+Setup preserves startup-file symlinks, applies all shell changes transactionally, and refuses to apply a stale reviewed patch. Pressing Ctrl-C at a prompt or during any shell, provider, key, or model check exits setup with status 130, restores normal terminal input, and leaves credentials, configuration, and shell files unchanged.
 
 ## Providers during setup
 
 Interactive setup always shows a compact four-provider menu and asks what to use. A previously saved provider is only the default answer, not a silent choice. Troubleshooting detail stays hidden for providers you do not select.
 
-Provider checks run against a **fresh subprocess**, because that is what humansh starts for each translation — a login that works in your current shell is not evidence that a clean subprocess will authenticate.
+The menu uses non-inference discovery: it checks whether each CLI executable exists without calling optional login, status, version, or help commands. After you choose Codex, Claude Code, or Cursor, setup discloses and sends one fixed minimal prompt through a fresh isolated subprocess. That live check may consume a small amount of provider quota.
 
-If Codex, Claude Code, or Cursor CLI is installed but logged out, setup offers to attach its official subscription-login command directly to your terminal. humansh never collects, proxies, or parses the login secret.
+Authentication belongs to the selected CLI distribution. Humansh neither infers its billing mode nor starts a login flow. This supports centrally managed corporate distributions whose inference command works while login subcommands are intentionally disabled. If the probe fails, setup shows the provider's bounded, redacted error text and waits while you fix the issue. Press Enter to retry the same provider in place, or answer no to return to the provider list.
 
 If several Claude or Cursor CLI installations are present in `PATH`, setup lets you keep automatic selection or pin one exact executable. Shell aliases and the Cursor editor launcher are intentionally not used.
 
-Setup requires **one proven, ready provider**. With none selected it stops before writing credentials, configuration, or shell integration, rather than leaving an unusable installation.
+Setup requires **one live, responding provider**. With none selected it stops before writing credentials, configuration, or shell integration. The minimal probe verifies provider reachability; run `humansh provider test NAME` to verify the complete production structured-output invocation and all mandatory safety flags.
 
 ### OpenRouter
 

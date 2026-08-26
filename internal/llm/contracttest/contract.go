@@ -27,9 +27,13 @@ func Run(t *testing.T, cases Cases) {
 	if cases.Provider.ID() != cases.ID {
 		t.Fatalf("provider ID=%q want %q", cases.Provider.ID(), cases.ID)
 	}
-	diagnostic := cases.Provider.Diagnose(context.Background())
-	if !diagnostic.Installed || !diagnostic.Configured || !diagnostic.Authenticated || !diagnostic.Available || diagnostic.AuthMode == "" {
-		t.Fatalf("provider diagnostic does not satisfy available contract: %+v", diagnostic)
+	discovery := cases.Provider.Diagnose(context.Background())
+	if !discovery.Installed || !discovery.Configured || discovery.AuthMode == "" {
+		t.Fatalf("provider discovery does not satisfy installed contract: %+v", discovery)
+	}
+	diagnostic := cases.Provider.Probe(context.Background())
+	if !diagnostic.LiveCheck || !diagnostic.Installed || !diagnostic.Configured || !diagnostic.Authenticated || !diagnostic.Available || diagnostic.AuthMode == "" {
+		t.Fatalf("provider live check does not satisfy available contract: %+v", diagnostic)
 	}
 	response, err := cases.Provider.Translate(context.Background(), llm.TranslationRequest{Input: "list files", Shell: "zsh", OS: "test", Architecture: "test"})
 	if err != nil {

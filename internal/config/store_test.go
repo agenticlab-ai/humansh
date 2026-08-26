@@ -51,7 +51,7 @@ func TestVersionOneConfigWithoutCursorSectionRemainsValid(t *testing.T) {
 	legacy = strings.Replace(legacy, `[providers.cursor]
 binary = ""
 model = ""
-auth_mode = "account"
+auth_mode = "provider_managed"
 
 `, "", 1)
 	legacy = strings.Replace(legacy, `order = ["codex", "claude", "cursor", "openrouter"]`, `order = ["codex", "claude", "openrouter"]`, 1)
@@ -59,8 +59,22 @@ auth_mode = "account"
 	if err != nil {
 		t.Fatalf("existing version-one config was rejected: %v\n%s", err, legacy)
 	}
-	if cfg.Cursor.AuthMode != "account" || cfg.Cursor.Binary != "" || cfg.Cursor.Model != "" {
+	if cfg.Cursor.AuthMode != "provider_managed" || cfg.Cursor.Binary != "" || cfg.Cursor.Model != "" {
 		t.Fatalf("Cursor defaults were not supplied for an existing config: %+v", cfg.Cursor)
+	}
+}
+
+func TestLegacyCLIAuthLabelsAreNormalizedToProviderManaged(t *testing.T) {
+	legacy := renderConfig(Default())
+	legacy = strings.Replace(legacy, `auth_mode = "provider_managed"`, "auth_mode = \"subscription\"\nsubscription_auth_confirmed = true", 1)
+	legacy = strings.Replace(legacy, `auth_mode = "provider_managed"`, `auth_mode = "subscription"`, 1)
+	legacy = strings.Replace(legacy, `auth_mode = "provider_managed"`, `auth_mode = "account"`, 1)
+	cfg, err := parseConfig(legacy)
+	if err != nil {
+		t.Fatalf("legacy provider auth labels were rejected: %v\n%s", err, legacy)
+	}
+	if cfg.Codex.AuthMode != "provider_managed" || cfg.Claude.AuthMode != "provider_managed" || cfg.Cursor.AuthMode != "provider_managed" {
+		t.Fatalf("legacy auth labels were not normalized: codex=%q claude=%q cursor=%q", cfg.Codex.AuthMode, cfg.Claude.AuthMode, cfg.Cursor.AuthMode)
 	}
 }
 

@@ -15,7 +15,7 @@ cmd/humansh → cli → bootstrap
 
 `cli` owns the Cobra command tree, fixed flag parsing, stdin/stdout protocol rendering, and exit-code presentation. Its handlers load the composition-root snapshot and delegate to app, config, setup, or diagnostics; they do not contain classification, provider, shell, or risk policy.
 
-`llm` owns common request/response contracts. Each provider child package owns only auth/capability diagnostics, transport, final structured-output extraction, and typed error mapping. It never classifies or manipulates a shell line editor.
+`llm` owns common request/response contracts. Each provider child package owns only non-inference discovery, its minimal live probe, transport, final structured-output extraction, and typed error mapping. It never classifies or manipulates a shell line editor.
 
 `shell` owns capabilities, the target-shell prompt profile, installation diagnostics, and generated-command syntax validation. The Zsh adapter embeds the ZLE asset and performs no-execution Zsh syntax checking. The Bash adapter embeds the Readline asset, requires Bash 4.3+, and validates with `bash --noprofile --norc -n`. Both use a private directory, a minimal environment, and stdin for the command. Neither selects a provider. Portable `mvdan.cc/sh/v3` AST inspection supplements—but cannot overrule—the selected shell's real syntax result for risk analysis.
 

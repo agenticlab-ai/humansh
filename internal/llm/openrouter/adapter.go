@@ -58,6 +58,23 @@ func (a Adapter) Diagnose(ctx context.Context) llm.Diagnostic {
 	return llm.Diagnostic{Installed: true, Configured: true, Authenticated: true, Available: true, AuthMode: "api_key", Version: a.Config.Model, Capabilities: []string{"strict-structured-output", "tools-disabled"}}
 }
 
+func (a Adapter) Probe(ctx context.Context) llm.Diagnostic {
+	diagnostic := a.Diagnose(ctx)
+	if !diagnostic.Available {
+		return diagnostic
+	}
+	response, err := a.ProbeStructuredOutput(ctx)
+	diagnostic.LiveCheck = true
+	if err != nil {
+		return providerutil.DiagnosticFromError(diagnostic, err)
+	}
+	if response.Status != "ok" || strings.TrimSpace(response.Command) == "" {
+		return providerutil.DiagnosticFromError(diagnostic, providerutil.Malformed("OpenRouter live check returned an incomplete response", nil))
+	}
+	diagnostic.Message = "OpenRouter responded to a minimal inference prompt"
+	return diagnostic
+}
+
 func (a Adapter) ValidateKey(ctx context.Context) error {
 	key, err := a.loadKey()
 	if err != nil {
@@ -352,9 +369,9 @@ func mapHTTP(status int, data []byte, timeout time.Duration) error {
 	case 401:
 		return usererr.WithExit(exitcode.ProviderAuth, "openrouter_auth", "OpenRouter API key is invalid, disabled, or expired.", "Nothing was changed or executed.", false, cause, usererr.Fix{Description: "Configure a valid key with", Command: "humansh provider configure openrouter"})
 	case 402:
-		return usererr.WithExit(exitcode.ProviderQuota, "openrouter_credits", "OpenRouter credits or the API key spending limit are exhausted.", "Nothing was changed or executed; no paid fallback was attempted.", true, cause,
+		return usererr.WithExit(exitcode.ProviderQuota, "openrouter_credits", "OpenRouter credits or the API key spending limit are exhausted.", "Nothing was changed or executed; no automatic fallback was attempted.", true, cause,
 			usererr.Fix{Description: "Add credits or raise this key's limit in OpenRouter"},
-			usererr.Fix{Description: "Or explicitly switch subscription provider with", Command: "humansh provider use codex"},
+			usererr.Fix{Description: "Or explicitly switch CLI provider with", Command: "humansh provider use codex"},
 			usererr.Fix{Description: "Or", Command: "humansh provider use claude"})
 	case 400:
 		return usererr.WithExit(exitcode.ProviderUnavailable, "openrouter_invalid_request", withOpenRouterDetail("OpenRouter rejected the configured model or structured-output schema.", data), "Nothing was changed or executed.", false, cause, usererr.Fix{Description: "Check the model and schema with", Command: "humansh provider test openrouter"})

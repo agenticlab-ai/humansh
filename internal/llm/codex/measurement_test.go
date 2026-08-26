@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"testing"
@@ -27,7 +26,7 @@ func TestRealCodexReleaseMeasurements(t *testing.T) {
 		sampleCount = parsed
 	}
 	adapter := Adapter{Config: realCodexConfig(t)}
-	diagnostic := adapter.Diagnose(context.Background())
+	diagnostic := adapter.Probe(context.Background())
 	if !diagnostic.Available {
 		t.Fatalf("Codex is not ready for release measurements: %+v", diagnostic)
 	}
@@ -73,7 +72,7 @@ func TestRealCodexReleaseMeasurements(t *testing.T) {
 		P95MS        int64  `json:"p95_ms"`
 		Date         string `json:"date"`
 	}{
-		Provider: "codex", Model: displayModel(adapter.Config.Model), Client: diagnostic.Version, Samples: sampleCount,
+		Provider: "codex", Model: displayModel(adapter.Config.Model), Client: "unavailable (not queried)", Samples: sampleCount,
 		InputTokens: "unavailable", OutputTokens: "unavailable", TotalTokens: "unavailable",
 		P50MS: p50.Milliseconds(), P95MS: p95.Milliseconds(), Date: time.Now().Format("2006-01-02"),
 	}
@@ -86,18 +85,9 @@ func TestRealCodexReleaseMeasurements(t *testing.T) {
 
 func realCodexConfig(t *testing.T) Config {
 	t.Helper()
-	authRoot := os.Getenv("CODEX_HOME")
-	if authRoot == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			t.Fatal(err)
-		}
-		authRoot = filepath.Join(home, ".codex")
-	}
 	return Config{
-		AuthRecordPath: filepath.Join(authRoot, "auth.json"),
-		Model:          os.Getenv("HUMANSH_REAL_CODEX_MODEL"),
-		Timeout:        60 * time.Second,
+		Model:   os.Getenv("HUMANSH_REAL_CODEX_MODEL"),
+		Timeout: 60 * time.Second,
 	}
 }
 

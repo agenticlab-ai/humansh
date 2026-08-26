@@ -121,13 +121,13 @@ These requirements override convenience and must be enforced in code and tests.
 8. **Limit generated command length to 4,096 bytes by default.**
 9. **Use local deterministic classification before any LLM call.** Clear literal commands must not incur network latency or consume subscription/API quota.
 10. **Do not send shell history, environment variables, secrets, repository contents, directory listings, usernames, hostnames, or file contents to providers.**
-11. **Do not silently fall back from a subscription provider to a metered OpenRouter provider.** Paid fallback requires explicit user configuration.
+11. **Do not silently fall back from a CLI provider to metered OpenRouter.** Paid fallback requires explicit user configuration.
 12. **Provider subprocesses must have a hard timeout, bounded stdout/stderr capture, isolated temporary working directory, a minimal allowlisted environment, and process-tree termination on cancellation.**
 13. **No telemetry, analytics, or logging of user input by default.**
 14. **No raw stack traces or provider dumps in normal user-facing errors.** Debug details are opt-in and must redact credentials.
 15. **High-risk generated commands require a stronger action than ordinary Enter.** They may be inserted for review, but ordinary Enter must refuse to execute them. The user must deliberately press `Ctrl-X`, then `Enter` after reviewing the exact command.
 16. **Commands typed literally by the user remain the user's responsibility.** Do not unexpectedly block a command the user explicitly wrote. The additional high-risk gate applies to LLM-generated commands, not normal literal commands.
-17. **Disable provider-side tools and auxiliary capabilities whenever the provider supports it.** Translation needs model inference only: no web search, apps/connectors, MCP, browser/computer use, subagents, shell execution, file reads, or session memory. Where a subscription CLI does not expose a true no-tools mode, use its strongest documented isolation, run in an empty directory, disable every optional capability that can be disabled, and fail closed if required isolation flags are unavailable.
+17. **Disable provider-side tools and auxiliary capabilities whenever the provider supports it.** Translation needs model inference only: no web search, apps/connectors, MCP, browser/computer use, subagents, shell execution, file reads, or session memory. Where a CLI does not expose a true no-tools mode, use its strongest documented isolation, run in an empty directory, disable every optional capability that can be disabled, and fail closed if required isolation flags are unavailable.
 18. **An LLM must never decide that the original buffer is safe to execute.** The local classifier alone determines `literal`, `natural_language`, or `ambiguous`. Providers are invoked only after a local `natural_language` result or an explicit force-translate action, and every provider result is inserted for review rather than executed.
 
 ---
@@ -1312,26 +1312,29 @@ Include a few stable examples in tests, not dozens of examples in the production
 
 Support four providers:
 
-1. Local Codex CLI using the user's Codex/ChatGPT subscription login when available.
-2. Local Claude Code CLI using the user's Claude subscription login when available.
-3. Local Cursor CLI using the user's account-backed Cursor browser login when available.
-4. OpenRouter using an API key for users who do not want to use subscription-based CLI services.
+1. Local Codex CLI using authentication managed by the selected CLI distribution.
+2. Local Claude Code CLI using authentication managed by the selected CLI distribution.
+3. Local Cursor CLI using authentication managed by the selected CLI distribution.
+4. OpenRouter using an explicitly configured metered API key.
 
-The active provider is explicit in configuration. Do not silently charge OpenRouter after a subscription provider fails.
+The active provider is explicit in configuration. Do not silently charge OpenRouter after a CLI provider fails.
 
-#### Subscription-auth contract
+#### Provider-managed CLI authentication contract
 
-For the MVP, `codex` and `claude` mean subscription-backed authentication, while `cursor` means an account-backed Cursor browser login. None may silently use usage-based API billing hidden behind those CLIs:
+Codex, Claude Code, and Cursor distributions own their authentication and billing policy. They may be vendor installations, centrally managed corporate distributions, or wrappers whose optional login/status interfaces are deliberately unavailable.
 
-- `codex` must use a saved **Sign in with ChatGPT** session. A saved Codex API-key login is usage-based and must not be treated as a usable subscription provider.
-- `claude` must use a saved **claude.ai subscription** login. Anthropic Console/API-key auth, Bedrock, Vertex, Foundry, a custom gateway, or an API-key environment override must not be treated as a usable subscription provider.
-- `cursor` must use a saved **Cursor browser login**. `CURSOR_API_KEY`, `CURSOR_AUTH_TOKEN`, a custom API endpoint, or equivalent command-line overrides must not be treated as a usable account-backed provider.
-- `openrouter` is the explicit metered API-key path.
-- Setup, `provider list`, and `doctor` must display both provider availability and detected authentication type, for example `ChatGPT subscription`, `Claude subscription`, `Cursor account`, `usage-based API key`, or `unknown`.
-- Never silently switch authentication modes. In particular, do not use a metered CLI credential merely because it is already present.
-- If the installed CLI is logged in but the authentication method cannot be confirmed as subscription-backed, mark the provider unusable and print a safe repair path. Unknown output must not itself be interpreted as subscription. The only exception is the Codex-specific, informed confirmation path in Section 10.2, which requires corroborating local subscription evidence and must never override contradictory API-key evidence.
+- Do not invoke, parse, or require optional CLI login, logout, auth-status, version, or help commands for readiness.
+- Do not inspect private auth-record formats or force a vendor login method. A successful inference does not prove a particular billing mode.
+- `Diagnose` performs non-inference discovery. For CLI adapters it checks executable/configuration presence only; `provider list` and `doctor` therefore remain non-billable.
+- `Probe` sends one disclosed, Humansh-owned constant prompt through the provider's normal non-interactive inference command and requires the fixed `HUMANSH_READY` marker. It may consume a small amount of quota.
+- The minimal CLI probe surface is `codex exec <prompt>`, `claude -p <prompt>`, or `cursor-agent -p <prompt> --trust`. Give Codex a private, empty Git worktree so the probe does not depend on an optional repository-check flag. Cursor requires workspace trust before contacting the model; acknowledge it only for the Humansh-created empty probe directory.
+- Setup probes only the selected provider. `provider use` runs the same minimal probe before saving the selection. Neither flow starts a login process.
+- `provider test` and normal translation invoke the structured production path directly, with no auth/version/help/capability preflight. A distribution that rejects a mandatory production option must fail closed and return its safe bounded error; never retry with weaker controls.
+- Treat CLI diagnostics as `provider_managed`; do not label them as ChatGPT subscription, Claude subscription, Cursor account, API-key, or logged out based on undocumented output.
+- Use the shared child-environment allowlist to exclude variables Humansh does not explicitly need, including generic API-key, endpoint, authless, local, and cloud-selector overrides. Do not maintain provider-specific auth-override detection tables or inspect those variables to decide readiness. Never alter the user's global environment or credentials.
+- `openrouter` remains the explicit directly configured metered API-key path and retains its key/model/schema validation flow.
 
-This restriction prevents surprising charges and matches the product promise. A future release may add a clearly named, explicit opt-in for metered Codex or Anthropic API auth, but it is out of scope for the MVP because OpenRouter already provides the metered path.
+This contract supports centrally administered distributions while keeping Humansh's provider choice explicit. Billing policy for a CLI provider belongs to that distribution and its administrator or user; Humansh must not promise to identify it.
 
 ### 10.1 Common provider process rules
 
@@ -1346,23 +1349,21 @@ For CLI providers:
 - Default timeout: 20 seconds, configurable between 3 and 60 seconds.
 - Put the subprocess in its own process group on Unix and kill the process group on timeout/cancellation so children do not survive.
 - Clean up temporary files on every path.
-- Build a minimal environment instead of forwarding `os.Environ()` wholesale. Preserve only values required for the executable, locale, TLS/proxy operation, temporary directory, and the provider's subscription credential location. Explicitly drop unrelated secrets such as cloud credentials, GitHub tokens, database URLs, and generic API-key variables.
-- The Codex subscription subprocess must explicitly omit `CODEX_API_KEY`, `OPENAI_API_KEY`, and any other variable that can override saved ChatGPT authentication.
-- The Claude subscription subprocess must explicitly omit `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, cloud-provider selectors such as `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, and `CLAUDE_CODE_USE_FOUNDRY`, plus other variables that select Console/API/gateway billing. Do not delete the user's environment globally; sanitize only the child process environment.
-- The account-backed Cursor subprocess must explicitly omit `CURSOR_API_KEY`, `CURSOR_AUTH_TOKEN`, `CURSOR_API_ENDPOINT`, and equivalent variables that select key billing or redirect the official endpoint.
+- Build a minimal environment instead of forwarding `os.Environ()` wholesale. Preserve only values required for the executable, locale, TLS/proxy operation, temporary directory, and documented provider-managed credential locations. Explicitly drop unrelated secrets such as cloud credentials, GitHub tokens, database URLs, and generic API-key variables.
+- The Codex subprocess must omit inherited `CODEX_API_KEY`, `OPENAI_API_KEY`, and similar generic overrides.
+- The Claude subprocess must omit inherited `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, and cloud-provider selectors, while narrowly forwarding documented Claude OAuth/credential-location values. Do not delete the user's environment globally; sanitize only the child process environment.
+- The Cursor subprocess must omit inherited `CURSOR_API_KEY`, `CURSOR_AUTH_TOKEN`, `CURSOR_API_ENDPOINT`, and equivalent authless/local/cloud overrides.
 - Keep the provider's credential store available only as required by the provider client. Never copy credentials into the temporary working directory or prompt.
 - Redact tokens, cookies, authorization headers, and API keys from captured diagnostics.
 - Do not enable retries that could create multiple billable model calls unless the error is provably pre-inference. The MVP may simply surface a retryable error and let the user press Enter again.
 
-Feature-detect capabilities where practical. Do not silently remove security-critical flags to support an obsolete CLI. If the installed version cannot provide the required non-interactive, structured, tool-restricted behavior, return an actionable “update the provider CLI” error.
-
-Capability detection must not rely on `--help` text alone. Prefer a non-billable parse/capability probe using a trivial no-op invocation and distinguish an unknown-option parse failure from authentication or model execution. Use version gating only when no direct probe exists. Provider diagnostics must record both reported version and observed capabilities because wrappers and launchers can report a different version from the executable that actually handles the request.
+Do not silently remove security-critical flags to support an incompatible CLI. The minimal readiness probe deliberately does not predict the entire production command surface. Enforce the complete structured/tool-restricted invocation on `provider test` and every translation; surface an unknown-option/config error directly and tell the user to update or reconfigure the selected distribution.
 
 ### 10.2 Codex provider
 
 Use Codex non-interactive mode through `codex exec`.
 
-Preferred invocation shape, subject to capability checks:
+Required production invocation shape:
 
 ```text
 codex exec
@@ -1374,7 +1375,6 @@ codex exec
   --strict-config
   --color never
   -c approval_policy="never"
-  -c forced_login_method="chatgpt"
   -c web_search="disabled"
   -c project_doc_max_bytes=0
   -c agents.enabled=false
@@ -1405,68 +1405,54 @@ Requirements:
 - `--ephemeral` plus `history.persistence="none"` prevents persistence of the one-off translation session.
 - `--skip-git-repo-check` is needed because translation runs in an empty temporary directory.
 - `--ignore-user-config` and `--ignore-rules` reduce accidental loading of user-specific agent behavior while retaining Codex authentication.
-- `forced_login_method="chatgpt"` is defense in depth against usage-based API authentication. It does not replace the explicit `codex login status` preflight.
-- Set `project_doc_max_bytes=0` so global or project `AGENTS.md` content cannot alter the translation contract. The empty temporary working directory prevents project-level discovery; test the installed CLI to confirm zero disables instruction loading. If a release rejects zero or still loads custom instructions, fail the provider capability check rather than running with untrusted instructions.
+- Authentication remains under the selected Codex distribution's control. Do not pass `forced_login_method` or inspect a private auth record.
+- Set `project_doc_max_bytes=0` so global or project `AGENTS.md` content cannot alter the translation contract. The empty temporary working directory prevents project-level discovery; behaviorally test reviewed releases to confirm zero disables instruction loading. If a distribution rejects zero or still loads custom instructions, fail the production call rather than running with untrusted instructions.
 - Explicitly disable web search, apps/connectors, shell execution, unified exec, shell snapshots, hooks, skill dependency installation, goals, memories, multi-agent tools, login-shell behavior, history persistence, and per-run analytics. `--strict-config` must make an obsolete CLI fail rather than silently ignore an isolation setting. Promote shell-tool and unified-exec disablement to hard preflight requirements, not optional defense in depth.
 - Construct Codex argv from an exact allowlist matching the invocation above plus the optional configured `--model`. Tests must reject every additional argument, including execution-enabling or directory-expanding flags. Do not maintain a moving denylist of dangerous flags.
 - Codex CLI may not expose a single universal deny-all-tools switch in every supported release. Disable every currently documented execution/extension capability listed above; if the installed release adds a stronger deny-all control, use it. The empty directory, read-only sandbox, disabled tool features, controlled instructions, final-message extraction, and local output validation are the minimum acceptable isolation. Document this limitation accurately instead of making an absolute claim that future Codex releases have no other tools.
 - Read exactly one response candidate: the final structured object from the file named by `--output-last-message`, and only after `codex exec` exits successfully. Never parse stdout, progress events, or intermediate assistant objects as the translation response. Codex may emit schema-valid intermediate objects such as `{"status":"ok","command":"",...}` while it is still reasoning; accepting one would turn unfinished work into the protocol result.
 - The validated Codex versions expose no supported maximum-turn control equivalent to Claude's bounded `--max-turns 3`; tested guesses such as `max_turns`, `features.max_turns`, and `turn_limit` are invalid strict-config keys. Do not claim Codex is one-turn and do not weaken `--strict-config` by inventing a turn-limit setting. Correctness rests on mandatory tool disablement plus final-message extraction.
 - If the final-message file is missing/empty, or its final object has `status: "ok"` with an empty command, return a typed incomplete/malformed-provider-response error using exit `25`. Treat it as retryable and say that Codex ended before producing a command; do not use the security-policy rejection message reserved for exit `26`.
-- If `--output-schema` is unavailable, report that Codex is too old and tell the user how to update it. Do not downgrade to unconstrained free-form output silently.
+- If `--output-schema` is unavailable, report that the selected Codex distribution does not support Humansh's structured invocation and tell the user to update or reconfigure it. Do not downgrade to unconstrained free-form output silently.
 - An optional configured model may be supplied with `--model`; otherwise Codex uses its built-in default. Because `--ignore-user-config` intentionally bypasses the user's configured model, setup should offer to copy that model explicitly into `providers.codex.model`.
 
-Provider diagnostics:
+Minimal live probe:
 
 ```text
-codex --version
-codex login status
-codex exec --help
+codex exec <constant-HUMANSH_READY-prompt>
 ```
 
-`codex login status` should be used for auth diagnosis, but its output is free-form prose rather than a stable JSON API. Parse it only through a versioned, fixture-tested table of accepted outputs, corroborate the result with a second local signal from the Codex auth record under `$CODEX_HOME`, and never print or copy credential material. Do not make a paid/model request merely to determine whether the user is signed in.
-
-If both signals establish a ChatGPT login, accept it. If wording changes but the local auth record remains consistent, allow an explicit configuration value recording that the user has confirmed subscription authentication; then warn that status text is unrecognized instead of permanently locking out an otherwise valid provider. This override must be set through setup/config with informed confirmation, must not turn API-key evidence into subscription evidence, and must be surfaced by `doctor`.
-
-Before every translation call, or through a short-lived cached preflight result, require the active auth mode to be established as ChatGPT-managed subscription auth through the accepted/corroborated signals or the narrowly scoped confirmation path above. The cache must be invalidated after auth failures and should expire quickly. If `CODEX_API_KEY` or another one-shot API credential is present in the parent environment, do not forward it to `codex exec`.
+Run it only when setup/provider selection explicitly requires a live check, disclose that it may consume quota, and require the marker in bounded stdout. `provider list` and `doctor` perform executable discovery only. A normal translation goes directly to the strict production invocation above.
 
 Actionable error examples:
 
 ```text
 humansh: Codex CLI is not installed.
-Fix: install Codex, then run `codex login`.
 Install: `curl -fsSL https://chatgpt.com/codex/install.sh | sh`
+Check: `humansh provider test codex`
 ```
 
 ```text
-humansh: Codex is not logged in, or its login has expired.
+humansh: Codex could not use its provider-managed authentication.
 Nothing was changed or executed.
-Fix: run `codex login`, choose “Sign in with ChatGPT,” finish browser sign-in, and retry.
-Check: `codex login status`
+Check: `humansh provider test codex`
+Follow the selected Codex distribution's supported authentication procedure.
 ```
 
 ```text
-humansh: Codex is signed in with usage-based API-key authentication, not your ChatGPT subscription.
-Nothing was changed or executed.
-Fix: run `codex logout`, then `codex login` and choose “Sign in with ChatGPT.”
-Check: `codex login status`
-Alternative: run `humansh provider use openrouter` if you intentionally prefer metered API usage.
-```
-
-```text
-humansh: Your Codex CLI is too old for safe structured translation.
-Fix: update it with `curl -fsSL https://chatgpt.com/codex/install.sh | sh`, then run `humansh doctor --provider codex`.
+humansh: Codex does not support Humansh's structured translation invocation.
+Fix: update or reconfigure it, then run `humansh provider test codex`.
 ```
 
 For errors that clearly indicate plan limits or rate limits, explain that the user's Codex allowance is temporarily unavailable and provide explicit provider-switch commands rather than a generic failure.
 
 ### 10.3 Claude Code provider
 
-Use Claude Code non-interactive print mode through `claude -p` while preserving subscription authentication.
+Use Claude Code non-interactive print mode through `claude -p` while preserving provider-managed authentication.
 
-**Do not use `--bare` for the subscription path.** Current Claude Code behavior intentionally does not read normal OAuth/subscription credentials in bare mode. Use safe mode plus explicit tool restrictions instead.
+**Do not use `--bare` for the production path.** Use safe mode plus explicit tool restrictions instead.
 
-Preferred invocation shape, subject to current capability checks:
+Required production invocation shape:
 
 ```text
 claude
@@ -1498,60 +1484,31 @@ Additional requirements:
 - An optional configured model may be supplied with `--model`; otherwise use the normal Claude Code default.
 - Treat auth failures that Claude sometimes reports in stdout as failures even if stderr is empty.
 
-Provider diagnostics and capability probes:
+Discovery and live probe:
 
-- Provider setup must identify the exact executable selected by `PATH`, distinguish an already-running authenticated session from the authentication available to a fresh subprocess, report simultaneous version/capability/authentication blockers rather than masking all but one, and show ordered copyable recovery commands. Only after the user chooses Claude, if multiple executables named `claude` are present in `PATH`, interactive setup must list them without executing every candidate, explain that shell aliases are not used, and let the user retain automatic PATH selection or pin one absolute executable in `providers.claude.binary`. Diagnose only the selected candidate before saving it.
-- Claude Code compatibility starts at 2.1.169, the first official release with `--safe-mode`; the later toolchain-reviewed release is a test baseline, not a minimum-version pin. Every other mandatory isolation option must still pass its direct probe.
-- Preserve Claude's documented subscription-only `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_OAUTH_REFRESH_TOKEN`, and `CLAUDE_CODE_OAUTH_SCOPES` variables only in the Claude subprocess environment. Never print, persist, or forward them to another provider; continue to reject API-key, custom-endpoint, and cloud-billing overrides.
+- Non-inference diagnosis finds only the selected executable. It must not call Claude version/help/auth/doctor surfaces.
+- Only after the user chooses Claude, if multiple executables named `claude` are present in `PATH`, interactive setup may list them without executing every candidate, explain that shell aliases are not used, and let the user retain automatic PATH selection or pin one absolute executable in `providers.claude.binary`.
+- The live probe is exactly `claude -p <constant-HUMANSH_READY-prompt>` in an empty temporary directory with the same minimal credential environment used by production. A managed distribution that disables `claude auth` remains usable when this succeeds.
+- Preserve Claude's documented `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_OAUTH_REFRESH_TOKEN`, and `CLAUDE_CODE_OAUTH_SCOPES` variables only in the Claude subprocess environment. Never print, persist, or forward them to another provider.
+- Do not pre-probe `--max-turns` or other required production options with help/version/parser commands. `provider test` and normal translation use the complete invocation and surface any rejected option without retrying more weakly.
 
 ```text
-claude --version
-claude auth status
-claude auth status --text
-claude doctor
+claude -p <constant-HUMANSH_READY-prompt>
 ```
-
-Do not infer `--max-turns` support from `claude --help`; current working releases may accept the flag without listing it. Probe required flags with a trivial invocation and detect argument-parse errors, or use a tested version gate when a no-inference probe is impossible.
-
-`claude auth status` returns machine-readable JSON in current releases. Parse it when available and require a claude.ai subscription login rather than Console/API billing or a third-party provider. Also inspect the sanitized environment before launch because `ANTHROPIC_API_KEY` can override a subscription in non-interactive `-p` mode. Do not run a paid/model request to discover auth state.
 
 Actionable error examples:
 
 ```text
 humansh: Claude Code is not installed.
-Fix: install it, then run `claude auth login --claudeai`.
 Install: `curl -fsSL https://claude.ai/install.sh | bash`
+Check: `humansh provider test claude`
 ```
 
 ```text
-humansh: Claude Code is not logged in, or its login has expired.
+humansh: Claude Code could not use its provider-managed authentication.
 Nothing was changed or executed.
-Fix: run `claude auth login --claudeai` and complete sign-in.
-Alternative: open `claude`, run `/login`, and exit after login succeeds.
-Check: `claude auth status --text`
-```
-
-```text
-humansh: Claude Code is using API/Console billing instead of your Claude subscription.
-Nothing was changed or executed.
-Fix: run `claude auth logout`, then `claude auth login --claudeai`.
-Check: `claude auth status --text`
-Alternative: run `humansh provider use openrouter` if you intentionally prefer metered API usage.
-```
-
-```text
-humansh: `ANTHROPIC_API_KEY` is overriding your Claude subscription.
-Nothing was changed or executed.
-Fix now: run `unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN` and retry.
-Fix permanently: remove those exports from `~/.zshrc`, `~/.zprofile`, or the file that sets them.
-Check: `claude auth status --text`
-```
-
-```text
-humansh: Claude Code is configured for a third-party API provider, not claude.ai subscription access.
-Nothing was changed or executed.
-Fix: unset the provider override shown below, then run `claude auth login --claudeai`.
-Check: `claude auth status --text`
+Check: `humansh provider test claude`
+Follow the selected Claude distribution's supported authentication procedure.
 ```
 
 ```text
@@ -1565,7 +1522,7 @@ Map Claude categories such as authentication failure, billing error, rate limit,
 
 Use Cursor's non-interactive print mode through `cursor-agent`; if that executable name is absent, fall back to `agent`. Never use `cursor`, which is the editor launcher rather than the agent CLI. Setup may pin an absolute executable path when multiple distinct installations are present.
 
-Preferred invocation shape, subject to capability checks:
+Required production invocation shape:
 
 ```text
 cursor-agent
@@ -1581,28 +1538,23 @@ Requirements:
 
 - Run from a newly created empty mode-`0700` temporary directory. `--trust` applies only to that disposable directory and prevents an interactive workspace-trust prompt.
 - Put the complete canonical instruction, response schema, and dynamic request JSON on stdin. No dynamic request content may appear in argv.
-- Require documented read-only Ask mode, sandboxing, non-interactive print mode, JSON output, and the trust control to appear in the installed command surface. If a required flag is absent or rejected, fail closed with an update instruction.
+- Require documented read-only Ask mode, sandboxing, non-interactive print mode, JSON output, and the trust control in every production call. If a required flag is rejected, fail closed with an update or reconfiguration instruction.
 - Cursor does not currently expose a native `--json-schema` output option. Demand the exact canonical object in the prompt, extract only `type=result`, `subtype=success`, `is_error=false` output, and apply the same strict local JSON decoder and response validator used for every provider. Never accept Markdown fences or surrounding prose.
 - Cursor does not currently expose a true no-tools flag. Ask mode is read-only, the request forbids external-state inspection, and the empty workspace prevents project files/project rules from being available; document accurately that provider-managed read-only capabilities may still exist rather than claiming all tools are disabled.
-- Use `cursor-agent status --format json` for a non-model authentication check. With all API-key/token/endpoint overrides rejected, an authenticated result establishes the official browser login. Logged-out, API-key, contradictory, malformed, and unknown results must remain distinct and fail closed.
-- Do not forward `CURSOR_API_KEY`, `CURSOR_AUTH_TOKEN`, or `CURSOR_API_ENDPOINT`. Selecting `cursor` must never silently choose metered API-key usage or redirect credentials.
+- Treat authentication as owned by the selected Cursor distribution. Do not call or parse its login/status surfaces.
+- Do not forward inherited `CURSOR_API_KEY`, `CURSOR_AUTH_TOKEN`, `CURSOR_API_ENDPOINT`, or equivalent authless/local/cloud overrides.
 - Keep only `HOME` and the minimal non-secret user identity needed for the same OS credential store as a direct terminal invocation; do not forward unrelated environment variables.
 - An optional configured model may be passed as one separate `--model` argument after config validation. Otherwise let Cursor use its account default.
 
-Provider diagnostics:
+Minimal live probe:
 
 ```text
-cursor-agent --version
-cursor-agent --help
-cursor-agent status --format json
+cursor-agent -p <constant-HUMANSH_READY-prompt> --trust
 ```
 
-Actionable recovery:
+Full compatibility check:
 
 ```text
-cursor-agent login
-cursor-agent status
-cursor-agent update
 humansh provider test cursor
 ```
 
@@ -1676,14 +1628,14 @@ Validate the key without spending model credits when possible, using a read-only
 
 Default setup behavior:
 
-1. Detect installed Codex and run the non-billable auth-status check. It is usable only when the active mode is ChatGPT subscription auth.
-2. Detect installed Claude Code and run the non-billable JSON auth-status check. It is usable only when the active mode is a claude.ai subscription and no API/cloud/gateway override would supersede it.
-3. Detect installed Cursor CLI, preferring `cursor-agent` and falling back to `agent`, and run its non-billable JSON status check. It is usable only with a Cursor browser login and no API-key/token/endpoint override.
+1. Discover installed Codex without running a subprocess.
+2. Discover installed Claude Code without running optional auth/version/help commands.
+3. Discover installed Cursor CLI, preferring `cursor-agent` and falling back to `agent`, without running optional auth/version/help commands.
 4. Detect an existing OpenRouter key.
 5. In every interactive setup run, show one concise status line for each provider and ask which provider to use. The saved provider is the default answer, never an automatic interactive selection.
-6. Keep diagnostics for unselected providers collapsed. Show executable, version, authentication, compatibility, and recovery details only for the provider the user chooses.
-7. If none are usable, keep the same concise menu and let the user choose a setup path, but do not complete setup without one proven, ready provider. Exit nonzero before writing credentials, configuration, or shell files so an invoking installer rolls back its binary replacement.
-8. A CLI that is installed and authenticated with a usage-based API key is shown as detected but not usable for the subscription adapter, with a one-command repair sequence.
+6. Keep diagnostics for unselected providers collapsed. After selection, disclose and run one constant minimal inference prompt for that provider only.
+7. Do not offer or launch provider login commands. On failure, show the bounded/redacted provider error and supported Humansh check commands.
+8. Do not complete setup without one live, responding provider. Exit nonzero before writing credentials, configuration, or shell files so an invoking installer rolls back its binary replacement.
 
 Configuration must name one active provider:
 
@@ -2040,18 +1992,17 @@ force_literal_binding = "^X^M"
 
 [providers.codex]
 model = ""
-auth_mode = "subscription"
-subscription_auth_confirmed = false # Explicit escape hatch for unrecognized status prose; setup owns confirmation.
+auth_mode = "provider_managed"
 
 [providers.claude]
 binary = ""                        # Empty selects the first claude in PATH; setup can pin an absolute path.
 model = ""
-auth_mode = "subscription"
+auth_mode = "provider_managed"
 
 [providers.cursor]
 binary = ""                        # Empty prefers cursor-agent, then falls back to agent; never the cursor editor launcher.
 model = ""
-auth_mode = "account"
+auth_mode = "provider_managed"
 
 [providers.openrouter]
 model = ""                         # Setup persists a concrete model only after a strict-schema probe succeeds.
@@ -2214,9 +2165,9 @@ Configuration and shell files are not changed until the final confirmation.
   – Bash 3.2.57      minimum required: Bash 4.3
 
 2/6  AI provider
-  ✓ Codex            ready — ChatGPT subscription
-  – Claude Code      not usable — login required
-  – Cursor CLI       not usable — login required
+  ? Codex            installed — live check pending
+  ? Claude Code      installed — live check pending
+  ? Cursor CLI       installed — live check pending
   – OpenRouter       not configured — metered
 
 3/6  Translation preferences
@@ -2243,18 +2194,16 @@ Configuration and shell files are not changed until the final confirmation.
   Bash: type natural language and press Ctrl-G; Enter runs normal Bash commands.
 ```
 
-Keep prompts concise and visually grouped. The first phase must be called **Shell compatibility**, not a generic environment check. List every installed supported shell with a concise parsed version. A compatible shell says `compatible`; an installed shell below its version floor shows only its minimum requirement rather than a long diagnostic. Do not list an absent shell as though it were an installation failure. Do not show shell-activation explanations or startup-file targets in this phase; reserve those details and managed-block patches for the final review. During shell discovery, provider diagnostics, post-login rechecks, and OpenRouter network checks, render an animated in-place loader when stdout is a usable terminal, then clear it before printing results or prompts. When output is redirected or the terminal is `dumb`, emit one stable `Checking…` line with no carriage returns or ANSI escapes. Use color and emphasis only on an interactive terminal, respect `NO_COLOR`, and never emit ANSI styling for redirected or non-interactive output. Explain whether the provider uses a subscription login or metered API key. Show human-readable shortcuts in prompts and summaries while continuing to store canonical shell-independent binding notation.
+Keep prompts concise and visually grouped. The first phase must be called **Shell compatibility**, not a generic environment check. List every installed supported shell with a concise parsed version. A compatible shell says `compatible`; an installed shell below its version floor shows only its minimum requirement rather than a long diagnostic. Do not list an absent shell as though it were an installation failure. Do not show shell-activation explanations or startup-file targets in this phase; reserve those details and managed-block patches for the final review. During shell discovery, the selected provider's live check, and OpenRouter network checks, render an animated in-place loader when stdout is a usable terminal, then clear it before printing results or prompts. When output is redirected or the terminal is `dumb`, emit one stable `Checking…` line with no carriage returns or ANSI escapes. Use color and emphasis only on an interactive terminal, respect `NO_COLOR`, and never emit ANSI styling for redirected or non-interactive output. Explain that CLI authentication is provider-managed and OpenRouter is metered. Show human-readable shortcuts in prompts and summaries while continuing to store canonical shell-independent binding notation.
 
-When the selected subscription CLI is installed but logged out, setup should offer to start its official login flow immediately:
+After the user selects an installed CLI, disclose the quota-consuming minimal probe:
 
 ```text
-! Codex: Sign-in needed.
-Sign in to Codex now? [Y/n]
+i The live check sends one constant minimal prompt and may consume a small amount of provider quota.
+… Checking Codex with its normal inference command…
 ```
 
-On approval, attach `codex login`, `claude auth login --claudeai`, or `cursor-agent login` directly to the user's TTY, wait for it to finish, rerun the auth-status check, and continue setup automatically. Never collect, proxy, or parse passwords, browser cookies, OAuth codes, or API keys yourself. If login fails and the user does not prove another provider, stop before applying setup, print the exact command the user can rerun, and return nonzero so an invoking installer rolls back its binary replacement.
-
-If an installed CLI is using metered auth, explain the difference before offering to replace the login. Never run `codex logout`, `claude auth logout`, or a Cursor logout without explicit confirmation because that changes existing credentials.
+Setup must never invoke login/logout/auth-status commands. A centrally managed CLI may intentionally reject those commands while normal inference succeeds. If the inference probe fails during interactive setup, show the provider's safe bounded error and let the user leave setup open while fixing the issue, then retry the same selected provider in place. Declining that retry returns to the provider menu unless an explicit provider was requested. Non-interactive setup, cancellation, or finishing without a ready provider must return nonzero before any changes.
 
 Do not print detailed diagnostics for unselected providers. The provider question itself is required even when exactly one provider is currently usable.
 
@@ -2262,7 +2211,7 @@ Setup must also:
 
 - Warn in plain language when a shortcut may replace an existing shell or terminal action, and offer a configurable alternative during setup. Keep implementation-specific keymap and terminal timing details in troubleshooting documentation instead of the setup wizard.
 - Accept friendly shortcut input such as `Ctrl-X Ctrl-T` or direct physical control-key input, and reject equal or prefix-overlapping shortcuts that would make one action unreachable. Shortcut prompts must capture control keys in raw terminal mode so line-editor actions such as `Ctrl-R` are not mistaken for an empty response; Enter ends the capture, so sequences that themselves end in Enter must be entered by their friendly name.
-- Show a final effective-configuration review and require confirmation before writing configuration or shell files. Cancellation must leave those files unchanged and return a cancellation status so the installer can roll back a newly replaced binary.
+- Show a final effective-configuration review and require confirmation before writing configuration or shell files. Ctrl-C at any prompt or in-progress shell, provider, key, or model check must cancel the active work, restore normal terminal input, exit with status 130, and leave credentials, configuration, and shell files unchanged so the installer can roll back a newly replaced binary.
 - When configuring Codex with `--ignore-user-config`, offer to copy the user's selected Codex model into `providers.codex.model`; otherwise explain that Codex's built-in default is used.
 - When the user chooses OpenRouter in interactive setup, configure it inside that setup flow rather than sending the user to another command: link to the key/model pages, collect the key without echo, validate the key once and validate each candidate's explicit `structured_outputs` capability without model credits, reject incompatible models with a filtered-model link, and immediately repeat the model-ID prompt so the user can paste another ID directly. Never put a yes/no prompt between failed and replacement model IDs; accept `back` to return to provider selection. Disclose and automatically run one minimal metered strict-schema check, stage the credential and concrete successful model until final confirmation, and leave the provider unconfigured if no candidate passes or setup is cancelled. Do not ask for separate approval for a check that is required to finish setup.
 
@@ -2308,10 +2257,10 @@ type Fix struct {
 Normal rendering should look like:
 
 ```text
-humansh: Codex is not logged in, or the login expired.
+humansh: Codex could not use its provider-managed authentication.
 Nothing was changed or executed.
-Fix: run `codex login`, complete browser sign-in, then retry.
-Check: `codex login status`
+Check: `humansh provider test codex`
+Follow the selected Codex distribution's supported authentication procedure.
 ```
 
 Do not print:
@@ -2349,10 +2298,9 @@ Implement and test at least these conditions:
 #### Codex
 
 - CLI missing.
-- CLI too old.
-- Login missing or expired.
-- Logged in with usage-based API-key auth instead of ChatGPT subscription auth.
-- Auth mode output unknown/unparseable.
+- Minimal inference probe failed or timed out, preserving safe provider detail.
+- Provider-managed authentication failed.
+- Mandatory structured/isolation option rejected.
 - Account/workspace denied.
 - Rate/usage limit reached.
 - Model unavailable.
@@ -2363,12 +2311,9 @@ Implement and test at least these conditions:
 #### Claude Code
 
 - CLI missing.
-- CLI too old.
-- Login missing or expired.
-- Logged in with Console/API billing instead of a claude.ai subscription.
-- `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` overriding subscription auth.
-- Bedrock, Vertex, Foundry, gateway, or custom base URL overriding claude.ai.
-- Auth status output unknown/unparseable.
+- Minimal `claude -p` inference probe failed or timed out, preserving safe provider detail.
+- Provider-managed authentication failed.
+- Mandatory structured/isolation option rejected.
 - OAuth organization disallowed.
 - Billing error.
 - Rate limit.
@@ -2377,6 +2322,15 @@ Implement and test at least these conditions:
 - Network failure.
 - Timeout.
 - Structured output invalid.
+
+#### Cursor CLI
+
+- CLI missing.
+- Minimal `cursor-agent -p <constant-prompt> --trust` inference probe failed or timed out, preserving safe provider detail.
+- Provider-managed authentication failed.
+- Mandatory read-only/structured invocation option rejected.
+- Account/workspace denied.
+- Quota/rate limit, network failure, timeout, or malformed output.
 
 #### OpenRouter
 
@@ -2409,11 +2363,11 @@ The error renderer must preserve the Section 12 distinction: malformed/incomplet
 Each error must include one or more tested repair commands where applicable, such as:
 
 ```text
-codex login
-codex login status
-claude auth login --claudeai
-claude auth status
-claude update
+humansh provider test codex
+humansh provider test claude
+humansh provider test cursor
+humansh doctor --provider codex
+humansh doctor --provider claude
 humansh provider configure openrouter
 humansh provider use codex
 humansh provider use claude
@@ -2628,8 +2582,7 @@ Place a fake `codex` executable first in a temporary `PATH`.
 
 The fake must support test responses for:
 
-- `--version`.
-- `login status` for ChatGPT subscription, API-key mode, logged-out mode, and unknown output.
+- Exact minimal `exec <constant-prompt>` success and failure from a private, empty Git worktree.
 - `exec` success with an output file.
 - Auth error.
 - Rate limit.
@@ -2645,19 +2598,19 @@ Assert:
 - Every user-derived value—including the first token and working path—is absent from argv.
 - User input arrives on stdin.
 - The subprocess environment excludes unrelated secret variables and specifically excludes `CODEX_API_KEY` and `OPENAI_API_KEY`.
-- API-key login is rejected with the subscription-repair instructions and does not invoke `codex exec`.
-- The complete argv matches the exact permitted flag/config-key allowlist. `approval_policy="never"`, read-only sandboxing, ephemeral/schema controls, forced ChatGPT auth, suppressed global/project instructions, and all specified web/apps/shell/unified-exec/hooks/skill/goals/memories/subagent/history/login-shell/analytics disables are present; no extra flag is accepted.
-- `features.shell_tool=false` and `features.unified_exec=false` are treated as mandatory capability checks. Rejection of either key fails before translation rather than retrying without it.
+- Diagnose executes no login/status/version/help/model subprocess. Probe executes exactly one minimal `codex exec` call and preserves safe provider stderr on failure.
+- Translation executes exactly one production model call with no auth/capability preflight.
+- The complete argv matches the exact permitted flag/config-key allowlist. `approval_policy="never"`, read-only sandboxing, ephemeral/schema controls, suppressed global/project instructions, and all specified web/apps/shell/unified-exec/hooks/skill/goals/memories/subagent/history/login-shell/analytics disables are present; no forced-login setting or extra flag is accepted.
+- `features.shell_tool=false` and `features.unified_exec=false` remain mandatory. Rejection of either key fails that production call and is never retried without it.
 - Working directory is isolated.
 - Timeout kills child processes.
 - Credentials are not printed.
-- Auth-status parsing uses versioned fixtures, corroborates with a redacted local auth-record signal, and permits only the explicit confirmed-subscription warning path for unrecognized prose—not contradictory API-key evidence.
-- A fixture where `codex --version` disagrees with the `codex exec` banner does not gate on the launcher string; capability results control usability, and `doctor` reports the skew using the actual exec banner when a version comparison is unavoidable.
+- No auth record or optional Codex command is read.
 - Only the completed output-last-message file is parsed. Schema-valid intermediate/stdout objects—including `ok` with an empty command—are ignored when a valid final object exists.
 - A final empty `ok` object maps to the dedicated retryable exit-`25` incomplete-response error, not exit `26`.
 - Codex argv/config contains no invented turn-limit key, and documentation/tests do not claim a one-turn guarantee for Codex.
 
-Add an opt-in behavioral isolation test against each supported real Codex CLI version, not just argv assertions. Create a mode-`0700` temporary working directory containing a distinctive tripwire filename and secret marker, send a prompt that explicitly baits the model to list/read the directory before answering, and assert that the tripwire is untouched, its secret content and actual command output never appear, and the response merely proposes a command. Run the same test with a fake capability-detection fallback that attempts to drop either mandatory tool-disable key and assert humansh fails closed. This test exists to catch provider behavior changes that syntactically valid argv tests cannot detect.
+Add an opt-in behavioral isolation test against each supported real Codex CLI version, not just argv assertions. Create a mode-`0700` temporary working directory containing a distinctive tripwire filename and secret marker, send a prompt that explicitly baits the model to list/read the directory before answering, and assert that the tripwire is untouched, its secret content and actual command output never appear, and the response merely proposes a command. This test exists to catch provider behavior changes that syntactically valid argv tests cannot detect.
 
 ### 20.5 Claude Code adapter integration tests
 
@@ -2665,17 +2618,16 @@ Use a fake `claude` executable.
 
 Assert:
 
-- `auth status` JSON is checked and distinguishes claude.ai subscription from Console/API and third-party providers.
-- Console/API auth and unknown auth status are rejected before a model request.
+- Diagnose executes no subprocess. Probe executes exactly `claude -p <constant-prompt>` and accepts a managed distribution even when its auth subcommands would be unavailable.
+- Probe failures preserve bounded, redacted provider stdout/stderr and never recommend an assumed vendor login command.
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, custom base URL, and cloud-provider override variables are absent from the translation subprocess environment.
-- Parent-process auth overrides produce actionable diagnostics without leaking their values.
 - `--safe-mode` is present.
-- `--bare` is absent for subscription mode.
+- `--bare` is absent.
 - Built-in and MCP tools are disabled.
 - Permission bypass flags are absent.
 - Session persistence is disabled.
 - Maximum turns is three so Claude's internal structured-output round trip can finish while the request remains bounded.
-- Capability probing does not grep `--help` for `--max-turns`; a fixture where help omits the flag but the parser accepts it remains usable, while a real unknown-option parse error fails safely.
+- Translation makes one production call with no auth/version/help/parser preflight; an unknown-option error fails safely and is not retried more weakly.
 - Dynamic input and working context are on stdin or derived locally, never argv.
 - The subprocess environment excludes unrelated secret variables.
 - `--no-chrome` is present.
@@ -2689,10 +2641,10 @@ Use a fake `cursor-agent` executable.
 Assert:
 
 - Automatic resolution prefers `cursor-agent`, falls back to `agent`, and never invokes the `cursor` editor launcher.
-- `status --format json` distinguishes browser login, logged out, API-key auth, and unknown/malformed states without a model request.
-- `CURSOR_API_KEY`, `CURSOR_AUTH_TOKEN`, and `CURSOR_API_ENDPOINT` reject the subscription provider before starting any child process.
+- Diagnose executes no subprocess. Probe executes exactly `cursor-agent -p <constant-prompt> --trust` in a Humansh-created empty directory and preserves safe provider errors.
+- Parent `CURSOR_API_KEY`, `CURSOR_AUTH_TOKEN`, `CURSOR_API_ENDPOINT`, and related overrides are not forwarded to the isolated child.
 - `--print --output-format json --mode ask --sandbox enabled --trust` is exact, the working directory is empty/private, and the full dynamic prompt/request is on stdin only.
-- Missing read-only/sandbox/JSON/trust capabilities fail closed before a model request.
+- Rejected read-only/sandbox/JSON/trust options fail the one production call and are never retried more weakly.
 - Only a final success result envelope is eligible; trailing JSON, Markdown-wrapped result text, unknown fields, duplicate keys, malformed output, and oversized output are rejected.
 - Login, model, quota, timeout, and temporary failures map to typed actionable errors.
 
@@ -2869,7 +2821,7 @@ The top of README should let a user understand and try the product quickly:
 2. A short terminal example.
 3. Safety statement: generated commands are inserted for review and never auto-executed.
 4. One-command installation placeholder plus checked-out-repo installation.
-5. Provider choices and subscription/API-key distinction.
+5. Provider choices and provider-managed-CLI/OpenRouter distinction.
 6. Default keybindings.
    Document the Escape collision with `vi-cmd-mode`, the stock `Ctrl-G` collisions (`send-break` in emacs and `list-expand` in vi modes), how setup reports replaced bindings, how to configure clear-line and both force bindings, and how `smart_enter=false` affects Enter.
 7. Three-way classification behavior, why ambiguous input is preserved, and how to inspect a decision with `humansh classify`.
@@ -2896,14 +2848,15 @@ Explain:
 
 Explain:
 
-- Codex CLI subscription mode.
-- Claude Code subscription mode and why humansh does not use Claude `--bare` for that path.
-- Cursor browser-login mode, executable selection, read-only Ask-mode invocation, local schema enforcement, and the documented no-tools limitation.
+- Provider-managed authentication for Codex, Claude Code, and Cursor, including centrally managed distributions with disabled login/status commands.
+- The minimal live-probe versus full structured-test distinction and quota disclosure.
+- Why humansh does not use Claude `--bare` for production translation.
+- Cursor executable selection, read-only Ask-mode invocation, local schema enforcement, and the documented no-tools limitation.
 - OpenRouter setup and metered billing.
 - Provider selection and no-silent-paid-fallback policy.
 - Model configuration.
 - For each tested provider/model, measured prompt/input/output/total token use when available and wall-clock p50/p95 translation latency, with client/model versions, sample size, and measurement date.
-- Codex's built-in-model behavior under `--ignore-user-config`, the option to copy an explicit model during setup, and the warning/confirmation behavior for unrecognized auth-status prose.
+- Codex's built-in-model behavior under `--ignore-user-config` and the option to copy an explicit model during setup.
 - Codex final-message extraction, the absence of a supported maximum-turn control in tested versions, and the neutral incomplete-response behavior for a final empty `ok`.
 - OpenRouter's concrete setup-time schema probe, possible metered cost, and why `openrouter/auto` is not the runtime default.
 
@@ -3091,45 +3044,40 @@ Expected:
 - Editing it into another high-risk form keeps the gate; editing it into a locally low/medium-risk command follows the reviewed generated-command policy.
 - Only `Ctrl-X`, then `Enter` delegates it to Zsh.
 
-### Scenario F: expired Codex login
+### Scenario F: centrally managed Claude distribution
 
-Expected error:
-
-```text
-humansh: Codex is not logged in, or the login expired.
-Nothing was changed or executed.
-Fix: run `codex login`, complete browser sign-in, then retry.
-Check: `codex login status`
-```
-
-The original input remains editable.
-
-### Scenario G: expired Claude login
-
-Expected error includes:
+The fake distribution returns this from every auth/login command:
 
 ```text
-Fix: run `claude auth login --claudeai` and complete sign-in.
-Check: `claude auth status --text`
+claude: error: Login disabled by ASBX toolbox distribution. No login required.
 ```
 
-### Scenario G2: wrong subscription authentication mode
-
-Test all of these states:
-
-1. Codex is authenticated with an API key.
-2. Claude Code is authenticated through Console/API billing, or `ANTHROPIC_API_KEY` is set.
-3. Cursor CLI is configured with an API key/auth token or custom endpoint.
+Its `claude -p <constant-prompt>` call returns `HUMANSH_READY`.
 
 Expected:
 
-- The provider is not marked usable as a subscription provider.
-- No translation/model request is made.
-- The error explains that the current method is usage-based.
-- The Codex repair says to run `codex logout`, then `codex login` and choose ChatGPT.
-- The Claude repair says to remove the API override or run `claude auth login --claudeai`, then verify with `claude auth status --text`.
-- The Cursor repair says to remove its API/endpoint override, run `cursor-agent login`, and verify with `cursor-agent status`.
-- OpenRouter is offered only as an explicit metered alternative.
+- Setup succeeds using the minimal print-mode probe.
+- No auth/login/status/version/help command is invoked.
+- The provider is recorded as `provider_managed`; Humansh makes no billing-mode claim.
+
+### Scenario G: provider-managed authentication failure
+
+The minimal inference command exits nonzero with a safe provider explanation. Expected:
+
+- The original input remains editable and setup makes no changes.
+- The bounded, redacted provider explanation is visible; `exit status 1` is not the only message.
+- Recovery points to `humansh provider test NAME` or `humansh doctor --provider NAME`, never to an assumed vendor login subcommand.
+
+### Scenario G2: minimal probe succeeds but production options are incompatible
+
+The bare inference surface returns `HUMANSH_READY`, then the real structured invocation rejects a mandatory option.
+
+Expected:
+
+- Setup/provider selection may pass the reachability check.
+- `humansh provider test NAME` and normal translation return the exact safe unknown-option/config detail.
+- There is one production call, no version/help/auth preflight, and no retry with weaker isolation or output controls.
+- OpenRouter remains only an explicit metered alternative.
 
 ### Scenario H: OpenRouter credits exhausted
 
@@ -3169,7 +3117,7 @@ Expected:
 
 - The marker is present only on provider stdin, never argv.
 - Unrelated credentials are absent from the provider environment.
-- Codex starts with ChatGPT auth forced, custom instruction discovery suppressed, and web search, apps, shell/exec tools, hooks, skill dependency installation, goals, memories, subagents, history, analytics, and login-shell behavior disabled.
+- Codex leaves authentication to its selected distribution while suppressing custom instruction discovery and disabling web search, apps, shell/exec tools, hooks, skill dependency installation, goals, memories, subagents, history, analytics, and login-shell behavior.
 - Claude starts with built-in/MCP tools, Chrome, customizations, slash commands, and session persistence disabled.
 - Nothing in normal or debug output leaks the marker or fake credentials.
 
@@ -3342,28 +3290,28 @@ The implementation is done only when:
 
 ## 27. Current provider-interface notes to preserve
 
-These are implementation constraints derived from the current official provider interfaces. Feature-detect where possible because CLIs evolve.
+These are implementation constraints derived from the current official provider interfaces. CLIs evolve, and centrally managed distributions may intentionally expose a smaller command surface.
 
-- Codex scripted execution uses `codex exec`; it supports ephemeral runs, read-only sandboxing, approval policy through strict config, running outside Git, output schema, and writing the final message to a file. Current config controls also permit forcing ChatGPT auth and disabling shell, unified exec, hooks, apps, multi-agent tools, web search, and instruction discovery for this isolated call. Read-only sandboxing does not disable the shell tool; both shell-tool config keys are mandatory.
+- Codex scripted execution uses `codex exec`; it supports ephemeral runs, read-only sandboxing, approval policy through strict config, running outside Git, output schema, and writing the final message to a file. Current config controls permit disabling shell, unified exec, hooks, apps, multi-agent tools, web search, and instruction discovery for this isolated call. Read-only sandboxing does not disable the shell tool; both shell-tool config keys are mandatory.
 - Codex may emit schema-shaped intermediate objects and has no supported maximum-turn setting in the validated versions. Only the completed `--output-last-message` object is eligible as the translation response; a final empty `ok` is an incomplete exit-`25` response.
-- Codex supports both ChatGPT subscription login and usage-based API-key login. `codex login status` reports the active mode as free-form prose; this product parses a versioned fixture set, corroborates locally, and accepts only ChatGPT subscription auth.
+- Codex readiness relies only on a minimal `codex exec` call. Humansh neither forces nor infers the distribution's authentication/billing mode.
 - Claude Code scripted execution uses `claude -p`; structured data is available through `--output-format json` and `--json-schema`.
-- `claude auth status` emits JSON in current releases. `claude auth login --console` selects API-usage billing, while `claude auth login --claudeai` explicitly selects the claude.ai subscription path; this product's `claude` adapter accepts only subscription auth.
-- In Claude Code print mode, `ANTHROPIC_API_KEY` can override subscription credentials, so the adapter must diagnose it and sanitize the child environment.
-- Claude Code `--bare` currently bypasses normal OAuth/keychain subscription authentication, so the subscription adapter must use `--safe-mode` plus disabled tools and session persistence instead.
+- Claude readiness relies only on a minimal `claude -p` call. Auth subcommands are not required and may be disabled by a managed distribution.
+- In Claude Code print mode, inherited API/endpoint/cloud overrides can alter routing, so the adapter sanitizes the child environment without trying to classify billing mode.
+- Production Claude translation uses `--safe-mode` plus disabled tools and session persistence rather than `--bare`.
 - Cursor scripted execution uses `cursor-agent --print --output-format json --mode ask --sandbox enabled --trust`; `agent` is a fallback executable name, while `cursor` is the editor launcher and must not be used.
 - Cursor's Ask mode is documented as read-only, but the CLI currently exposes neither a native no-tools flag nor JSON-schema output. Run it only in an empty disposable workspace, put the schema/request on stdin, parse only its final success envelope, and enforce the canonical schema locally. Do not overstate this as total tool removal.
-- Cursor account selection requires the browser login reported by `cursor-agent status --format json`; API-key, auth-token, and custom-endpoint overrides are rejected.
+- Cursor readiness relies only on `cursor-agent -p <constant-prompt> --trust` in a Humansh-created empty directory. Inherited API-key, auth-token, endpoint, authless, local, and cloud overrides are excluded rather than classified.
 - OpenRouter uses Bearer authentication against its OpenAI-compatible chat-completions endpoint and supports a restricted JSON-schema structured-output subset. Its wire schema omits unsupported string-length keywords, which remain locally enforced.
 - OpenRouter configuration records a concrete model proven by the setup-time schema probe; `openrouter/auto` is not the runtime default.
 
-When an installed provider version disagrees with these capabilities, fail safely with a specific update instruction rather than weakening isolation or structured-output validation.
+When a provider distribution rejects a mandatory production capability, fail safely with a specific update/reconfiguration instruction rather than weakening isolation or structured-output validation.
 
 ---
 
 ## 28. Official interface references
 
-Provider CLIs and hosted APIs evolve. At implementation time, confirm current official documentation and probe installed capabilities directly. `--help` output is diagnostic evidence but is not authoritative on its own; supported flags may be omitted. Feature detection is required, but never weaken a safety property merely to support an old version.
+Provider CLIs and hosted APIs evolve. At implementation time, confirm current official documentation. Readiness must use only the minimal normal inference surface; do not add `--help`, version, or parser preflights. The production structured call itself is authoritative for mandatory flags, and a rejection must never trigger a weaker retry.
 
 The corrections in this specification were toolchain-checked against Codex CLI 0.148.0/0.149.0, Claude Code 2.1.238, Cursor CLI 2026.07.23, Zsh 5.9, the macOS Bash 3.2 limitation, and Go 1.26.4. Bash integration requires Bash 4.3 or newer. These are review baselines, not permanent minimum versions.
 
@@ -3385,4 +3333,4 @@ The corrections in this specification were toolchain-checked against Codex CLI 0
 - OpenRouter errors: https://openrouter.ai/docs/api-reference/errors-and-debugging
 - OpenRouter Auto Router: https://openrouter.ai/docs/guides/routing/routers/auto-router
 
-The implementation documentation should record the minimum tested versions of Codex CLI, Claude Code, and Cursor CLI used by CI fixtures. Do not pin users forever to those versions; diagnose capabilities and provide an update command when a required flag is missing. Where a version gate is unavoidable, prefer the version/banner emitted by the actual provider subcommand being exercised over a separate launcher-level `--version`, and report mismatches in `doctor` rather than trusting either silently.
+The implementation documentation may record reviewed CLI releases as development baselines, but must not gate users by invoking a version command. When a required production option is missing, preserve the provider's safe error and recommend updating or reconfiguring the selected distribution.

@@ -25,9 +25,8 @@ type ShellConfig struct {
 }
 
 type CodexConfig struct {
-	Model                     string
-	AuthMode                  string
-	SubscriptionAuthConfirmed bool
+	Model    string
+	AuthMode string
 }
 
 type ClaudeConfig struct {
@@ -85,9 +84,9 @@ func Default() RuntimeConfig {
 			ForceTranslateBinding: "^G",
 			ForceLiteralBinding:   "^X^M",
 		},
-		Codex:      CodexConfig{AuthMode: "subscription"},
-		Claude:     ClaudeConfig{AuthMode: "subscription"},
-		Cursor:     CursorConfig{AuthMode: "account"},
+		Codex:      CodexConfig{AuthMode: "provider_managed"},
+		Claude:     ClaudeConfig{AuthMode: "provider_managed"},
+		Cursor:     CursorConfig{AuthMode: "provider_managed"},
 		OpenRouter: OpenRouterConfig{BaseURL: "https://openrouter.ai/api/v1", CredentialRef: "openrouter-default"},
 		Fallback:   FallbackConfig{Order: []llm.ProviderID{llm.Codex, llm.Claude, llm.Cursor, llm.OpenRouter}},
 	}
@@ -168,14 +167,14 @@ func (c RuntimeConfig) Validate() error {
 	if c.Fallback.Enabled || c.Fallback.AllowMeteredOpenRouter {
 		return fmt.Errorf("automatic fallback is not supported in the MVP")
 	}
-	if c.Codex.AuthMode != "subscription" {
-		return fmt.Errorf("providers.codex.auth_mode must be subscription")
+	if c.Codex.AuthMode != "provider_managed" {
+		return fmt.Errorf("providers.codex.auth_mode must be provider_managed")
 	}
-	if c.Claude.AuthMode != "subscription" {
-		return fmt.Errorf("providers.claude.auth_mode must be subscription")
+	if c.Claude.AuthMode != "provider_managed" {
+		return fmt.Errorf("providers.claude.auth_mode must be provider_managed")
 	}
-	if c.Cursor.AuthMode != "account" {
-		return fmt.Errorf("providers.cursor.auth_mode must be account")
+	if c.Cursor.AuthMode != "provider_managed" {
+		return fmt.Errorf("providers.cursor.auth_mode must be provider_managed")
 	}
 	if err := validateExecutablePath(c.Claude.Binary); err != nil {
 		return fmt.Errorf("providers.claude.binary: %w", err)

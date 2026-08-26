@@ -43,7 +43,7 @@ The generated command lands in your editable command line. Nothing runs until yo
 - **Runs in your shell, not a wrapper.** Integration happens at the ZLE/Readline layer, so `cd`, `export`, aliases, functions, and job control behave normally. It is not a REPL, terminal emulator, or replacement shell.
 - **Stays quiet when you type real commands.** A local, deterministic classifier decides before any network call, so `git status` costs no latency and no quota.
 - **Refuses to guess.** Input that is genuinely ambiguous is left untouched and never sent to a provider.
-- **Uses the subscription you already pay for.** Codex, Claude Code, and Cursor CLI run under your existing login. Metered OpenRouter API billing is opt-in only, and there is no silent fallback to it.
+- **Uses your existing provider CLI setup.** Codex, Claude Code, and Cursor own their authentication and billing policy, including centrally managed distributions. Metered OpenRouter API billing is opt-in only, with no silent fallback.
 - **Sends very little.** Your request, shell, OS, architecture, a privacy-normalised directory label, and a fixed list of detected tools. Never shell history, environment variables, file contents, or your username.
 
 ## Requirements
@@ -129,11 +129,11 @@ Full rules, weights, and the grammar lexicon: [docs/classification.md](docs/clas
 
 ## Providers
 
-| Provider | Billing | Requirement |
+| Provider | Authentication/billing ownership | Requirement |
 |---|---|---|
-| `codex` | ChatGPT subscription | "Sign in with ChatGPT". API-key auth rejected. |
-| `claude` | claude.ai subscription | claude.ai login. Console/API/cloud overrides rejected. |
-| `cursor` | Cursor subscription | Cursor browser login. API-key and custom endpoints rejected. |
+| `codex` | Managed by the selected Codex CLI distribution | A successful `codex exec` live check. |
+| `claude` | Managed by the selected Claude Code distribution | A successful `claude -p` live check. |
+| `cursor` | Managed by the selected Cursor CLI distribution | A successful `cursor-agent -p … --trust` live check in a private empty directory. |
 | `openrouter` | **Metered API key** | A model proven against humansh's strict-output schema. |
 
 ```sh
@@ -143,7 +143,9 @@ humansh provider test codex
 humansh provider configure openrouter --model provider/model
 ```
 
-Every translation runs the provider in an empty temporary directory with a minimal environment, tools disabled, and no session persistence. A rejected isolation setting fails closed rather than downgrading. CLI providers are selectable only once a version floor and direct capability probes confirm each mandatory control.
+Setup and `provider use` disclose and send one constant minimal prompt, which may consume a small amount of provider quota. Humansh deliberately does not call or parse optional CLI login, status, version, or help surfaces; centrally managed distributions may omit them. `provider test` runs the real structured translation path and returns the provider's bounded, redacted error text when it fails.
+
+Every structured translation runs in an empty temporary directory with a minimal environment. Codex and Claude tool/isolation controls remain mandatory; Cursor uses its read-only Ask/sandbox mode and local schema validation. A rejected production flag fails closed rather than downgrading.
 
 **There is no silent fallback to metered OpenRouter.** See [docs/providers.md](docs/providers.md).
 

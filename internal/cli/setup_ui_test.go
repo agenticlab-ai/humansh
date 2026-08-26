@@ -3,19 +3,87 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"errors"
+	"io"
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/agenticlab-ai/humansh/internal/config"
 	"github.com/agenticlab-ai/humansh/internal/llm"
 	"github.com/agenticlab-ai/humansh/internal/shell"
 )
 
+type blockingSetupReader struct {
+	once    sync.Once
+	started chan struct{}
+	release chan struct{}
+}
+
+func newBlockingSetupReader() *blockingSetupReader {
+	return &blockingSetupReader{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (reader *blockingSetupReader) Read([]byte) (int, error) {
+	reader.once.Do(func() { close(reader.started) })
+	<-reader.release
+	return 0, io.EOF
+}
+
 func interactiveSetupUI(input string, out, errOut *bytes.Buffer) *setupUI {
 	streams := IO{In: strings.NewReader(input), Out: out, Err: errOut}
 	return &setupUI{streams: streams, reader: bufio.NewReader(streams.In), interactive: true}
+}
+
+func TestSetupPromptsReturnWhenContextIsCancelled(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		read func(*setupUI) (string, error)
+	}{
+		{name: "plain prompt", read: func(ui *setupUI) (string, error) { return ui.prompt("Choice", "1") }},
+		{name: "secret prompt", read: func(ui *setupUI) (string, error) { return ui.promptSecret("Secret") }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			reader := newBlockingSetupReader()
+			defer close(reader.release)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var out bytes.Buffer
+			ui := newSetupUI(IO{In: reader, Out: &out}, true)
+			ui.ctx = ctx
+
+			result := make(chan error, 1)
+			go func() {
+				_, err := test.read(ui)
+				result <- err
+			}()
+
+			select {
+			case <-reader.started:
+			case <-time.After(time.Second):
+				t.Fatal("prompt did not start reading input")
+			}
+			cancel()
+			select {
+			case err := <-result:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("prompt error = %v, want context cancellation", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("prompt did not return after context cancellation")
+			}
+		})
+	}
 }
 
 func TestSetupStartupPatchShowsManagedLinesOnly(t *testing.T) {
@@ -368,24 +436,24 @@ func TestCtrlRShortcutWarnsAboutCommandHistory(t *testing.T) {
 	}
 }
 
-func TestSetupProviderDiagnosticShowsSelectedBinaryAndNextSteps(t *testing.T) {
+func TestSetupProviderDiagnosticShowsLiveFailureAndNextSteps(t *testing.T) {
 	t.Parallel()
 	var out, errOut bytes.Buffer
 	ui := interactiveSetupUI("", &out, &errOut)
 	ui.providerDiagnostic(llm.Claude, llm.Diagnostic{
-		Installed:     true,
-		Authenticated: true,
-		AuthMode:      "claude.ai",
-		Executable:    "/first-on-path/claude",
-		Version:       "2.1.168 (Claude Code)",
-		Message:       "version is below the verified baseline",
+		Installed:  true,
+		Configured: true,
+		LiveCheck:  true,
+		AuthMode:   "provider_managed",
+		Executable: "/first-on-path/claude",
+		Message:    "organization policy denied inference",
 		NextSteps: []llm.DiagnosticAction{
-			{Description: "Update Claude Code", Command: "claude update"},
+			{Description: "Test Claude Code", Command: "humansh provider test claude"},
 			{Description: "Recheck", Command: "humansh setup"},
 		},
 	})
 	text := out.String()
-	for _, want := range []string{"Claude Code", "Update needed", `Executable "/first-on-path/claude"`, "2.1.168", "Next:", "claude update", "Then:", "humansh setup"} {
+	for _, want := range []string{"Claude Code", "Live check failed", "organization policy denied inference", `Executable "/first-on-path/claude"`, "Next:", "humansh provider test claude", "Then:", "humansh setup"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("provider diagnostic missing %q:\n%s", want, text)
 		}
