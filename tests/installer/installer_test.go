@@ -81,6 +81,9 @@ esac
 	if !strings.Contains(string(output), "Installed humansh to "+installed) {
 		t.Fatalf("release install did not report completion:\n%s", output)
 	}
+	if !strings.Contains(string(output), "MIT-licensed") || !strings.Contains(string(output), "blob/main/LICENSE") {
+		t.Fatalf("release install did not print the license and liability notice:\n%s", output)
+	}
 }
 
 func writeReleaseFixture(t *testing.T, directory, asset string) (string, string) {
