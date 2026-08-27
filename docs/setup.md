@@ -7,7 +7,7 @@
 ### From a release
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/agenticlab-ai/humansh/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/agenticlab-ai/humansh/main/scripts/install.sh | sh
 ```
 
 The installer downloads the matching binary from the latest GitHub release and verifies its SHA-256 checksum before installing to `~/.local/bin`. It never installs Codex, Claude Code, Cursor, Homebrew, Go, or any other third-party software on your behalf.
@@ -16,7 +16,7 @@ A fork can point the installer at its own release repository:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/OWNER/REPOSITORY/main/scripts/install.sh \
-  | HUMANSH_REPOSITORY=OWNER/REPOSITORY bash
+  | HUMANSH_REPOSITORY=OWNER/REPOSITORY sh
 ```
 
 See [security](security.md) for why a same-host checksum establishes integrity but not authenticity.
