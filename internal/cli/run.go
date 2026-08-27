@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -119,20 +120,21 @@ func newRootCommand(streams IO, exitCode *int) *cobra.Command {
 	smartCommand := addRuntimeCommand("smart", "smart [protocol flags]", "Classify input and translate natural language", false, func(ctx context.Context, args []string, runtime bootstrap.Runtime, streams IO) int {
 		return runProtocol(ctx, "smart", args, runtime, streams)
 	})
-	addProtocolFlags(smartCommand)
+	addProtocolFlags(smartCommand, true)
 	translateCommand := addRuntimeCommand("translate", "translate [protocol flags]", "Force translation of input for review", false, func(ctx context.Context, args []string, runtime bootstrap.Runtime, streams IO) int {
 		return runProtocol(ctx, "translate", args, runtime, streams)
 	})
-	addProtocolFlags(translateCommand)
+	addProtocolFlags(translateCommand, false)
 	analyzeCommand := addRuntimeCommand("analyze", "analyze [--json]", "Validate and risk-score a shell command", false, runAnalyze)
 	analyzeCommand.Flags().String("protocol", "", "shell protocol")
 	analyzeCommand.Flags().String("shell", "zsh", "target shell")
 	analyzeCommand.Flags().Bool("json", false, "emit JSON")
-	classifyCommand := addRuntimeCommand("classify", "classify [--json]", "Inspect local classification evidence", false, func(_ context.Context, args []string, runtime bootstrap.Runtime, streams IO) int {
-		return runClassify(args, runtime, streams)
+	classifyCommand := addRuntimeCommand("classify", "classify [--json]", "Inspect local classification evidence", false, func(ctx context.Context, args []string, runtime bootstrap.Runtime, streams IO) int {
+		return runClassify(ctx, args, runtime, streams)
 	})
 	classifyCommand.Flags().String("shell", "zsh", "target shell")
 	classifyCommand.Flags().String("first-token-kind", "unknown", "active-shell first token kind")
+	classifyCommand.Flags().String("resolved-command-path", "", "exact external command path resolved by the active shell")
 	classifyCommand.Flags().Bool("json", false, "emit JSON")
 	classifyCommand.Flags().Bool("zle-status", false, "emit the fixed ZLE provider-status hint")
 	addRuntimeCommand("classifier", "classifier [operation]", "Manage local classifier overrides", false, func(_ context.Context, args []string, runtime bootstrap.Runtime, streams IO) int {
@@ -172,10 +174,13 @@ func newRootCommand(streams IO, exitCode *int) *cobra.Command {
 	return root
 }
 
-func addProtocolFlags(command *cobra.Command) {
+func addProtocolFlags(command *cobra.Command, includeResolvedPath bool) {
 	command.Flags().String("protocol", "", "shell protocol (defaults to the selected shell)")
 	command.Flags().String("shell", "", "target shell: bash or zsh (defaults to configuration)")
 	command.Flags().String("first-token-kind", "unknown", "active-shell first token kind")
+	if includeResolvedPath {
+		command.Flags().String("resolved-command-path", "", "exact external command path resolved by the active shell")
+	}
 }
 
 func cobraHelpRequested(command *cobra.Command, args []string, exitCode *int) bool {
@@ -193,6 +198,7 @@ func runProtocol(ctx context.Context, name string, args []string, rt bootstrap.R
 	protocolFlag := fs.String("protocol", "", "shell protocol")
 	shellFlag := fs.String("shell", string(rt.Config.Shell.Name), "target shell")
 	kindFlag := fs.String("first-token-kind", "unknown", "active-shell first token kind")
+	resolvedPathFlag := fs.String("resolved-command-path", "", "resolved external command path")
 	if fs.Parse(args) != nil || fs.NArg() != 0 {
 		return 2
 	}
@@ -214,12 +220,20 @@ func runProtocol(ctx context.Context, name string, args []string, rt bootstrap.R
 		fmt.Fprintf(streams.Err, "invalid --first-token-kind %q\n", *kindFlag)
 		return 2
 	}
+	if !validResolvedCommandPath(*resolvedPathFlag) || *resolvedPathFlag != "" && kind != shell.TokenCommand {
+		fmt.Fprintln(streams.Err, "invalid --resolved-command-path")
+		return 2
+	}
+	if name != "smart" && *resolvedPathFlag != "" {
+		fmt.Fprintln(streams.Err, "--resolved-command-path is only valid for smart classification")
+		return 2
+	}
 	input, err := readProtocolInput(streams, name, 1<<20)
 	if err != nil {
 		return renderError(streams, usererr.WithExit(protocol.ExitConfig, "input", "Input could not be read.", "Nothing was changed or executed.", false, err), false)
 	}
 	cwd, _ := os.Getwd()
-	request := app.RuntimeRequest{Input: string(input), ShellID: shellID, FirstTokenKind: kind, WorkingDir: cwd, Config: rt.Config, Overrides: rt.Overrides}
+	request := app.RuntimeRequest{Input: string(input), ShellID: shellID, FirstTokenKind: kind, ResolvedCommandPath: *resolvedPathFlag, WorkingDir: cwd, Config: rt.Config, Overrides: rt.Overrides}
 	var result app.Result
 	if name == "smart" {
 		result, err = rt.Engine.Smart(ctx, request)
@@ -278,11 +292,12 @@ func runAnalyze(ctx context.Context, args []string, rt bootstrap.Runtime, stream
 	return result.ExitCode
 }
 
-func runClassify(args []string, rt bootstrap.Runtime, streams IO) int {
+func runClassify(ctx context.Context, args []string, rt bootstrap.Runtime, streams IO) int {
 	fs := flag.NewFlagSet("classify", flag.ContinueOnError)
 	fs.SetOutput(streams.Err)
 	shellFlag := fs.String("shell", string(rt.Config.Shell.Name), "shell")
 	kindFlag := fs.String("first-token-kind", "unknown", "first token kind")
+	resolvedPathFlag := fs.String("resolved-command-path", "", "resolved external command path")
 	jsonFlag := fs.Bool("json", false, "JSON output")
 	zleStatus := fs.Bool("zle-status", false, "emit the fixed ZLE provider-status hint")
 	if fs.Parse(args) != nil || fs.NArg() != 0 {
@@ -302,14 +317,23 @@ func runClassify(args []string, rt bootstrap.Runtime, streams IO) int {
 		fmt.Fprintf(streams.Err, "invalid --first-token-kind %q\n", *kindFlag)
 		return 2
 	}
-	result := rt.Engine.Classifier.Classify(classifier.Input{Raw: string(input), Shell: *shellFlag, FirstTokenKind: kind, Overrides: rt.Overrides})
+	if !validResolvedCommandPath(*resolvedPathFlag) || *resolvedPathFlag != "" && kind != shell.TokenCommand {
+		fmt.Fprintln(streams.Err, "invalid --resolved-command-path")
+		return 2
+	}
+	result := rt.Engine.Classifier.ClassifyContext(ctx, classifier.Input{Raw: string(input), Shell: *shellFlag, FirstTokenKind: kind, ResolvedCommandPath: *resolvedPathFlag, Overrides: rt.Overrides})
+	if ctx.Err() != nil {
+		return 130
+	}
 	if *zleStatus {
-		// Carry the provider label back with the hint. The widget needs it to show
-		// "Translating with <provider>…" before it blocks, and this call is already
-		// being made, so the label costs nothing extra. Resolving it here also keeps
-		// the label live after `humansh provider use`, and removes any reason for
-		// the integration to spawn humansh at shell startup just to read it.
-		if result.Outcome == classifier.Natural {
+		// Return the complete fixed decision so ZLE never has to classify the same
+		// input a second time. The provider label rides only with translation.
+		switch result.Outcome {
+		case classifier.Literal:
+			fmt.Fprint(streams.Out, "literal")
+		case classifier.Ambiguous:
+			fmt.Fprint(streams.Out, "ambiguous")
+		case classifier.Natural:
 			fmt.Fprintf(streams.Out, "translate %s", rt.Config.Provider.Label())
 		}
 		return 0
@@ -330,7 +354,11 @@ func renderClassification(out io.Writer, result classifier.Result) {
 			fmt.Fprintf(out, "  %+d %s/%s — %s\n", e.Weight, e.Domain, e.Code, e.Detail)
 		}
 	}
-	fmt.Fprintln(out, "Nothing was executed and no AI provider was contacted.")
+	fmt.Fprintln(out, "The typed line was not executed and no AI provider was contacted.")
+}
+
+func validResolvedCommandPath(value string) bool {
+	return value == "" || filepath.IsAbs(value) && !strings.ContainsAny(value, "\x00\r\n")
 }
 
 func runClassifier(args []string, rt bootstrap.Runtime, streams IO) int {

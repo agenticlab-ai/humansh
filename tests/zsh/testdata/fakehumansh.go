@@ -24,6 +24,7 @@ func main() {
 		file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err == nil {
 			_, _ = fmt.Fprintf(file, "%s|%s\n", mode, strings.ReplaceAll(input, "\n", "\\n"))
+			_, _ = fmt.Fprintf(file, "argv|%s|%q\n", mode, os.Args[2:])
 			_ = file.Close()
 		}
 	}
@@ -39,10 +40,14 @@ func main() {
 	}
 	if mode == "classify" {
 		switch input {
-		case "show me files", "move a file", "delete build", "configured English prefix files", "auth please", "unsupported please", "incomplete please", "policy please", "unicode please", "slow please", "split streams please", "empty success please", "parent cd", "parent export":
+		case "show me files", "move a file", "delete build", "configured English prefix files", "auth please", "unsupported please", "incomplete please", "policy please", "unicode please", "slow please", "split streams please", "empty success please", "parent cd", "parent export", "unknown result":
 			// The real binary appends the provider label so the widget can render
 			// its pre-blocking status without a shell-startup lookup.
 			fmt.Print("translate Codex")
+		case "ambiguous words", "echo show me the files", "which process is using port 3000", "open the project folder", "gti status":
+			fmt.Print("ambiguous")
+		default:
+			fmt.Print("literal")
 		}
 		return
 	}
@@ -59,7 +64,7 @@ func main() {
 		os.Exit(0)
 	}
 	switch input {
-	case "git status", "echo show me the files", "which git", "configured-literal project", "mv old new":
+	case "git status", "which git", "configured-literal project", "mv old new":
 		os.Exit(0)
 	case "show me files":
 		fmt.Print("print -r -- GENERATED_LOW")
@@ -73,7 +78,7 @@ func main() {
 	case "ambiguous words":
 		fmt.Fprint(os.Stderr, "Not sure whether this is English or a command. Next: press Ctrl-G to translate it, or press Ctrl-X then Enter to run it unchanged.")
 		os.Exit(11)
-	case "which process is using port 3000", "open the project folder", "gti status":
+	case "echo show me the files", "which process is using port 3000", "open the project folder", "gti status":
 		fmt.Fprint(os.Stderr, "Not sure whether this is English or a command. Next: press Ctrl-G to translate it, or press Ctrl-X then Enter to run it unchanged.")
 		os.Exit(11)
 	case "configured English prefix files":

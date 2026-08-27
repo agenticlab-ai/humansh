@@ -149,6 +149,20 @@ _humansh_first_token_kind() {
   esac
 }
 
+_humansh_resolved_command_path() {
+	local kind=$1 token resolved_path
+	local -a words
+	[[ $kind == command ]] || return 1
+	words=(${(z)BUFFER})
+	(( ${#words} )) || return 1
+	token=${words[1]}
+	resolved_path=$(builtin whence -p -- "$token" 2>/dev/null) || return 1
+	[[ -n $resolved_path && $resolved_path != *[[:cntrl:]]* ]] || return 1
+	[[ $resolved_path == /* ]] || resolved_path=${resolved_path:a}
+	[[ $resolved_path == /* ]] || return 1
+	print -r -- "$resolved_path"
+}
+
 _humansh_prior_enter() {
   local keymap=${KEYMAP:-main}
 	local widget
@@ -233,13 +247,32 @@ _humansh_replay_deferred_keys() {
 }
 
 _humansh_call() {
-	local mode=$1 original_buffer=$BUFFER original_cursor=$CURSOR kind output error_output error_file output_file exit_status zle_status provider_label
+	local mode=$1 original_buffer=$BUFFER original_cursor=$CURSOR kind resolved_command_path output error_output error_file output_file exit_status zle_status provider_label classify_status
+	local -a resolution_args
 	setopt localtraps
 	kind=$(_humansh_first_token_kind)
 	if [[ $mode == translate ]]; then
 		zle_status=translate
 	else
-		zle_status=$(print -rn -- "$BUFFER" | command humansh classify --zle-status --shell zsh --first-token-kind "$kind" 2>/dev/null)
+		resolved_command_path=$(_humansh_resolved_command_path "$kind" 2>/dev/null) || resolved_command_path=''
+		[[ -n $resolved_command_path ]] && resolution_args=(--resolved-command-path "$resolved_command_path")
+		zle_status=$(print -rn -- "$BUFFER" | command humansh classify --zle-status --shell zsh --first-token-kind "$kind" "${resolution_args[@]}" 2>/dev/null)
+		classify_status=$?
+		if (( classify_status != 0 )); then
+			BUFFER=$original_buffer
+			CURSOR=$original_cursor
+			if (( classify_status == 126 || classify_status == 127 )); then
+				if [[ $_HUMANSH_WARNED_MISSING == 0 ]]; then
+					_humansh_message 'humansh is unavailable; using the previous Enter binding.'
+					zle -R
+					_HUMANSH_WARNED_MISSING=1
+				fi
+				_humansh_prior_enter
+				return 1
+			fi
+			_humansh_message "humansh could not classify this line; your text is unchanged. Next: press ${_HUMANSH_FORCE_LITERAL_LABEL} to run it unchanged."
+			return $classify_status
+		fi
 	fi
 	# The hint is either empty or "translate", optionally followed by the provider
 	# label. The label comes from a fixed enum in Go, but strip control characters
@@ -249,6 +282,20 @@ _humansh_call() {
 		_HUMANSH_PROVIDER_LABEL=${provider_label//[[:cntrl:]]/}
 		zle_status=translate
 	fi
+	case $zle_status in
+		literal) return 0 ;;
+		ambiguous)
+			BUFFER=$original_buffer
+			CURSOR=$original_cursor
+			_humansh_message "Not sure whether this is English or a command. Next: press ${_HUMANSH_FORCE_TRANSLATE_LABEL} to translate it, or press ${_HUMANSH_FORCE_LITERAL_LABEL} to run it unchanged."
+			return 11 ;;
+		translate) mode=translate ;;
+		*)
+			BUFFER=$original_buffer
+			CURSOR=$original_cursor
+			_humansh_message "humansh returned an invalid classification; your text is unchanged. Next: press ${_HUMANSH_FORCE_LITERAL_LABEL} to run it unchanged."
+			return 70 ;;
+	esac
 	if [[ $zle_status == translate ]]; then
 		output_file=$(command mktemp "${TMPDIR:-/tmp}/humansh-zle.XXXXXXXXXX" 2>/dev/null)
 	fi

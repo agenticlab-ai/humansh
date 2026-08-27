@@ -6,6 +6,7 @@ import (
 
 	"github.com/agenticlab-ai/humansh/internal/app"
 	"github.com/agenticlab-ai/humansh/internal/classifier"
+	"github.com/agenticlab-ai/humansh/internal/commandgrammar"
 	"github.com/agenticlab-ai/humansh/internal/config"
 	"github.com/agenticlab-ai/humansh/internal/contextinfo"
 	"github.com/agenticlab-ai/humansh/internal/llm"
@@ -139,7 +140,8 @@ func build(diagnostic bool) (Runtime, error) {
 	if err != nil {
 		return Runtime{}, err
 	}
-	return Runtime{Engine: app.Engine{Classifier: classifier.Classifier{}, Providers: providers, Shells: shells, Validator: validate.Validator{}, Risk: risk.Analyzer{}, Context: contextinfo.Local{}}, ProviderSetup: providerSetup{}, Config: cfg, Overrides: overrides, Store: store, Paths: paths, LoadIssues: issues}, nil
+	invocations := commandgrammar.NewRuntimeAnalyzer()
+	return Runtime{Engine: app.Engine{Classifier: classifier.Classifier{Invocations: invocations}, Providers: providers, Shells: shells, Validator: validate.Validator{}, Risk: risk.Analyzer{}, Context: contextinfo.Local{}}, ProviderSetup: providerSetup{}, Config: cfg, Overrides: overrides, Store: store, Paths: paths, LoadIssues: issues}, nil
 }
 
 func configuredProviders(cfg config.RuntimeConfig, paths config.Paths) (llm.MapRegistry, error) {

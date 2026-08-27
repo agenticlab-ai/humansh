@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -68,6 +69,13 @@ type recordingRisk struct {
 	commands []string
 }
 
+type contextClassifier struct{}
+
+func (contextClassifier) ClassifyContext(ctx context.Context, _ classifier.Input) classifier.Result {
+	<-ctx.Done()
+	return classifier.Result{Outcome: classifier.Literal}
+}
+
 func (r *recordingRisk) Analyze(command string) risk.Result {
 	r.commands = append(r.commands, command)
 	return risk.Result{Level: risk.Medium, Reasons: []string{"fake_state_change"}}
@@ -89,8 +97,24 @@ func TestSmartDoesNotCallProviderForLiteralOrAmbiguous(t *testing.T) {
 	if ambiguous.Message != "Not sure whether this is English or a command. Next: press Ctrl-G to translate it, or press Ctrl-X then Enter to run it unchanged." {
 		t.Fatalf("ambiguous message is not actionable: %q", ambiguous.Message)
 	}
+	for _, shellID := range []shell.ID{shell.Zsh, shell.Bash} {
+		ambiguousTail, err := engine.Smart(context.Background(), RuntimeRequest{Input: "fixturevcs is failing please authenticate", ShellID: shellID, FirstTokenKind: shell.TokenCommand, Config: cfg})
+		if err != nil || ambiguousTail.ExitCode != protocol.ExitAmbiguous || ambiguousTail.Classification == nil {
+			t.Fatalf("shell=%s ambiguous tail=%+v err=%v", shellID, ambiguousTail, err)
+		}
+	}
 	if provider.calls != 0 {
 		t.Fatalf("provider calls=%d", provider.calls)
+	}
+}
+
+func TestSmartPropagatesClassificationCancellation(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := (Engine{Classifier: contextClassifier{}}).Smart(ctx, RuntimeRequest{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Smart cancellation error=%v", err)
 	}
 }
 

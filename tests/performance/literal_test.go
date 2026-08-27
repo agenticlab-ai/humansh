@@ -23,13 +23,13 @@ import (
 // moving decisively if startup genuinely regresses.
 func TestLiteralProcessStartupRegressionCeiling(t *testing.T) {
 	const samples = 15
-	binary, environment := buildBinary(t)
+	binary, helpCommand, environment := buildBinary(t)
 	durations := make([]time.Duration, samples)
 	for index := range durations {
 		started := time.Now()
-		command := exec.Command(binary, "smart", "--protocol", "zle-v1", "--shell", "zsh", "--first-token-kind", "command")
+		command := exec.Command(binary, "smart", "--protocol", "zle-v1", "--shell", "zsh", "--first-token-kind", "command", "--resolved-command-path", helpCommand)
 		command.Env = environment
-		command.Stdin = bytes.NewBufferString("git status")
+		command.Stdin = bytes.NewBufferString("fixturevcs status")
 		if output, err := command.CombinedOutput(); err != nil {
 			t.Fatalf("literal smart call: %v: %s", err, output)
 		} else if len(output) != 0 {
@@ -46,18 +46,18 @@ func TestLiteralProcessStartupRegressionCeiling(t *testing.T) {
 }
 
 func BenchmarkLiteralProcessStartup(b *testing.B) {
-	binary, environment := buildBinary(b)
-	warmup := exec.Command(binary, "smart", "--protocol", "zle-v1", "--shell", "zsh", "--first-token-kind", "command")
+	binary, helpCommand, environment := buildBinary(b)
+	warmup := exec.Command(binary, "smart", "--protocol", "zle-v1", "--shell", "zsh", "--first-token-kind", "command", "--resolved-command-path", helpCommand)
 	warmup.Env = environment
-	warmup.Stdin = bytes.NewBufferString("git status")
+	warmup.Stdin = bytes.NewBufferString("fixturevcs status")
 	if err := warmup.Run(); err != nil {
 		b.Fatal(err)
 	}
 	b.ResetTimer()
 	for range b.N {
-		command := exec.Command(binary, "smart", "--protocol", "zle-v1", "--shell", "zsh", "--first-token-kind", "command")
+		command := exec.Command(binary, "smart", "--protocol", "zle-v1", "--shell", "zsh", "--first-token-kind", "command", "--resolved-command-path", helpCommand)
 		command.Env = environment
-		command.Stdin = bytes.NewBufferString("git status")
+		command.Stdin = bytes.NewBufferString("fixturevcs status")
 		if err := command.Run(); err != nil {
 			b.Fatal(err)
 		}
@@ -65,7 +65,7 @@ func BenchmarkLiteralProcessStartup(b *testing.B) {
 }
 
 func BenchmarkClassifierProcessStartup(b *testing.B) {
-	binary, environment := buildBinary(b)
+	binary, _, environment := buildBinary(b)
 	run := func() {
 		command := exec.Command(binary, "classify", "--json", "--shell", "zsh", "--first-token-kind", "command")
 		command.Env = environment
@@ -83,7 +83,7 @@ func BenchmarkClassifierProcessStartup(b *testing.B) {
 	}
 }
 
-func buildBinary(tb testing.TB) (string, []string) {
+func buildBinary(tb testing.TB) (string, string, []string) {
 	tb.Helper()
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
@@ -96,6 +96,12 @@ func buildBinary(tb testing.TB) (string, []string) {
 	build.Dir = repository
 	if output, err := build.CombinedOutput(); err != nil {
 		tb.Fatalf("build humansh: %v: %s", err, output)
+	}
+	helpCommand := filepath.Join(tempDir, "fixturevcs")
+	buildHelp := exec.Command("go", "build", "-o", helpCommand, "./internal/commandgrammar/testdata/helpfixture")
+	buildHelp.Dir = repository
+	if output, err := buildHelp.CombinedOutput(); err != nil {
+		tb.Fatalf("build command-help fixture: %v: %s", err, output)
 	}
 	home := filepath.Join(tempDir, "home")
 	if err := os.MkdirAll(home, 0o700); err != nil {
@@ -113,5 +119,5 @@ func buildBinary(tb testing.TB) (string, []string) {
 			environment = append(environment, key+"="+value)
 		}
 	}
-	return binary, environment
+	return binary, helpCommand, environment
 }
