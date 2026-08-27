@@ -59,7 +59,7 @@ Bash integration needs 4.3 or newer so humansh can safely capture and restore ex
 ## Install
 
 ```sh
-curl -fsSL https://humansh.com/install | bash
+curl -fsSL https://humansh.com/install | sh
 ```
 
 This downloads the installer, fetches the matching binary from the latest release, and verifies its SHA-256 checksum before installing to `~/.local/bin`. No `sudo`, and no third-party software is installed on your behalf.
