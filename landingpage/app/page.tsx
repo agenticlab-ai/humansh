@@ -400,7 +400,16 @@ export default function Home() {
             <a href={githubUrl} target="_blank" rel="noreferrer" data-analytics-event="github_open" data-analytics-placement="footer_repo">GitHub <Arrow /></a>
           </div>
         </div>
-        <div className="container footerBottom"><span>© 2026 HumanSH</span><span>MIT licensed · Website counts aggregate visits and selected actions without cookies or user IDs</span></div>
+        <div className="container footerLegal">
+          <p>
+            HumanSH is open-source software released under the{" "}
+            <a href={`${githubUrl}/blob/main/LICENSE`} target="_blank" rel="noreferrer" data-analytics-event="github_open" data-analytics-placement="footer_license">
+              MIT License
+            </a>
+            , provided &ldquo;as is&rdquo; without warranty of any kind and without liability of its authors, as stated in the license. Generated commands come from the AI provider you connect and can be wrong. HumanSH never runs them for you: nothing executes until you review a command and press Enter, and every command you run is your responsibility.
+          </p>
+        </div>
+        <div className="container footerBottom"><span>© 2026 HumanSH</span><span>Website counts aggregate visits and selected actions without cookies or user IDs</span></div>
       </footer>
     </>
   );

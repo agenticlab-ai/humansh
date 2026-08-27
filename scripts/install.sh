@@ -159,3 +159,4 @@ case $onboarding_io in
 		echo "humansh installer: onboarding could not be shown. Run '$binary onboarding' later." >&2
 	fi ;;
 esac
+echo "humansh is MIT-licensed and provided \"as is\", with no warranty and no author liability; you are responsible for every command you run. License: https://github.com/agenticlab-ai/humansh/blob/main/LICENSE"

@@ -84,11 +84,23 @@ test("server-renders the HumanSH landing page", async () => {
   assert.equal(visibleHtml.match(/\bfree\b/gi)?.length, 2);
   assert.equal(
     visibleHtml.match(/data-analytics-event="github_open"/g)?.length,
-    8,
+    9,
   );
   assert.match(
     visibleHtml,
     /Website counts aggregate visits and selected actions without cookies or user IDs/,
+  );
+  assert.match(
+    visibleHtml,
+    /without warranty of any kind and without liability of its authors/,
+  );
+  assert.match(
+    visibleHtml,
+    /every command you run is your responsibility/,
+  );
+  assert.match(
+    visibleHtml,
+    /href="https:\/\/github\.com\/agenticlab-ai\/humansh\/blob\/main\/LICENSE"/,
   );
 
   const meteredMentions = visibleHtml.match(/.{0,40}metered API.{0,80}/gi) ?? [];

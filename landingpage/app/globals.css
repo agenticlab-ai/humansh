@@ -1586,6 +1586,30 @@ section {
   gap: 6px;
 }
 
+.footerLegal {
+  padding: 24px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.footerLegal p {
+  margin: 0;
+  max-width: 760px;
+  color: #949fb1;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.footerLegal a {
+  color: #cdd5e1;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 160ms ease;
+}
+
+.footerLegal a:hover {
+  color: var(--blue-strong);
+}
+
 .footerBottom {
   display: flex;
   align-items: center;
