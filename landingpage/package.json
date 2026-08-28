@@ -43,5 +43,10 @@
     "vite": "8.2.2",
     "wrangler": "4.126.0"
   },
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "^0.25.0"
+    }
+  },
   "type": "module"
 }
