@@ -1,4 +1,4 @@
-.PHONY: build test test-architecture test-classifier bench-classifier test-race test-integration test-zsh test-bash lint install uninstall verify
+.PHONY: build test test-architecture test-classifier bench-classifier test-race test-integration test-zsh test-bash test-e2e lint install uninstall verify
 
 build:
 	go build -o humansh ./cmd/humansh
@@ -28,6 +28,9 @@ test-zsh:
 
 test-bash:
 	go test ./internal/shell/bash/... ./tests/bash/...
+
+test-e2e:
+	HUMANSH_RUN_E2E=1 go test -count=1 -v ./tests/e2e/...
 
 lint:
 	test -z "$$(gofmt -l .)"
