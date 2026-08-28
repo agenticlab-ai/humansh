@@ -113,13 +113,13 @@ These requirements override convenience and must be enforced in code and tests.
 
 1. **Never automatically execute an LLM-generated command.**
 2. **Never call `eval` on provider output.**
-3. **The `humansh` binary never executes the generated command.** It only returns a validated string to the selected shell adapter. Execution remains in the parent shell so commands such as `cd`, `export`, aliases, functions, and job-control operations work correctly.
+3. **The `humansh` binary never executes the original typed line or a generated command.** It only returns a validated generated string to the selected shell adapter. Execution remains in the parent shell so commands such as `cd`, `export`, aliases, functions, and job-control operations work correctly. The bounded installed-command help probes in Section 7.5.1 are not execution of either line, but they do invoke local executable code and have a separate trust boundary.
 4. **Never invoke providers through `sh -c`, `zsh -c`, or string-concatenated shell commands.** Use `exec.CommandContext` with an explicit argument array.
-5. **Pass every user-derived value through stdin or an in-memory HTTP body, never as a process argument.** This includes the full request, its first token, paths copied from it, and any generated command. Fixed enum-like metadata may be passed as flags. This prevents ordinary process listings from exposing user input and avoids shell-quoting vulnerabilities.
+5. **Pass every user-derived value through stdin or an in-memory HTTP body, never as a provider process argument.** This includes the full request, its first token, paths copied from it, and any generated command. Fixed enum-like metadata may be passed as flags. The active shell may separately pass the absolute executable path it resolved for command-help analysis; the analyzer must validate and invoke that path directly, never concatenate it into a shell command. This prevents ordinary process listings from exposing the request and avoids shell-quoting vulnerabilities.
 6. **Preserve the original ZLE or Readline buffer and cursor on every provider, validation, setup, or internal error.**
 7. **Reject provider output containing NUL bytes, carriage returns, newlines, terminal control characters, ANSI escape sequences, or more than one physical command line.** A single line may still contain normal shell operators such as pipes or `&&`.
 8. **Limit generated command length to 4,096 bytes by default.**
-9. **Use local deterministic classification before any LLM call.** Clear literal commands must not incur network latency or consume subscription/API quota.
+9. **Use local, inspectable classification before any LLM call.** Clear literal commands must not consume subscription/API quota. Runtime command structure may reflect the exact installed executable's current bounded help output.
 10. **Do not send shell history, environment variables, secrets, repository contents, directory listings, usernames, hostnames, or file contents to providers.**
 11. **Do not silently fall back from a CLI provider to metered OpenRouter.** Paid fallback requires explicit user configuration.
 12. **Provider subprocesses must have a hard timeout, bounded stdout/stderr capture, isolated temporary working directory, a minimal allowlisted environment, and process-tree termination on cancellation.**
@@ -129,6 +129,7 @@ These requirements override convenience and must be enforced in code and tests.
 16. **Commands typed literally by the user remain the user's responsibility.** Do not unexpectedly block a command the user explicitly wrote. The additional high-risk gate applies to LLM-generated commands, not normal literal commands.
 17. **Disable provider-side tools and auxiliary capabilities whenever the provider supports it.** Translation needs model inference only: no web search, apps/connectors, MCP, browser/computer use, subagents, shell execution, file reads, or session memory. Where a CLI does not expose a true no-tools mode, use its strongest documented isolation, run in an empty directory, disable every optional capability that can be disabled, and fail closed if required isolation flags are unavailable.
 18. **An LLM must never decide that the original buffer is safe to execute.** The local classifier alone determines `literal`, `natural_language`, or `ambiguous`. Providers are invoked only after a local `natural_language` result or an explicit force-translate action, and every provider result is inserted for review rather than executed.
+19. **Installed-command help inspection is bounded but not sandboxed.** Invoke only the exact executable resolved by the active shell, with fixed `--help` probes and previously documented subcommand prefixes. Never pass an unrecognized user tail, use a shell wrapper, directly run `man` or completion code, or try speculative `-h`/positional `help` forms. Enforce isolated directories, a minimal environment, EOF stdin, output/time/depth/probe limits, and process-group cancellation, while documenting that an executable may ignore help conventions, launch other code, and perform side effects.
 
 ---
 
@@ -603,11 +604,12 @@ Required options:
 --protocol zle-v1
 --shell zsh
 --first-token-kind <alias|function|builtin|reserved|command|unresolved|empty|unknown>
+--resolved-command-path <absolute-path>  Optional; only for kind=command.
 ```
 
 The Bash integration uses `--protocol readline-v1 --shell bash` and the same fixed first-token-kind enum.
 
-The first-token text and complete input remain on stdin. The process inherits the shell's current directory, and the binary derives `none`, `basename`, or explicitly opted-in `full` working context locally. Never expose the request, token text, current path, or generated command in argv. The active adapter should pass `unknown` when it cannot determine the token kind; if the flag is omitted, the binary must behave equivalently and remain conservative.
+The first-token text and complete input remain on stdin. The process inherits the shell's current directory, and the binary derives `none`, `basename`, or explicitly opted-in `full` working context locally. Never expose the request, token text, working directory, or generated command in argv. The exact absolute external-command path is the sole path exception and is used only for bounded help inspection. The active adapter should pass `unknown` when it cannot determine the token kind; if either metadata flag is omitted, the binary must remain conservative.
 
 ### `humansh translate`
 
@@ -625,7 +627,7 @@ Classify stdin without calling a provider. Human-readable output by default and 
 - Every evidence item with its domain, stable reason code, and weight.
 - The supplied first-token-kind hint, when present.
 
-Do not include the raw input in JSON or debug logs by default. The command reads the input from stdin and accepts the same fixed enum `--first-token-kind` hint as `smart` for reproducible debugging.
+Do not include the raw input or resolved path in JSON or debug logs by default. The command reads the input from stdin and accepts the same fixed enum `--first-token-kind` hint and optional `--resolved-command-path` metadata as `smart` for reproducible debugging.
 
 ### `humansh classifier list`
 
@@ -720,7 +722,7 @@ For generated results, write exactly the command bytes to stdout with no decorat
 
 ## 7. Local intent classification
 
-Classification must be deterministic, local, fast, explainable, and conservative. The target is under 10 milliseconds at the 95th percentile on a typical development laptop, excluding process startup. The classifier must not call a provider, open the network, execute the input, expand shell syntax, source shell startup files, or inspect shell history.
+Classification must be local, explainable, bounded, and conservative. The pure lexical/scoring path targets under 10 milliseconds at the 95th percentile on a typical development laptop, excluding process startup. Installed-command grammar discovery has separate strict subprocess timeout, output, traversal-depth, and probe-count limits. The classifier must not call a provider, execute the typed line or a generated command, expand shell syntax, source shell startup files, or inspect shell history. Humansh itself does not open the network during classification, although an invoked executable can ignore `--help` conventions and do so.
 
 ### 7.1 Classify intent, not syntax
 
@@ -774,13 +776,14 @@ const (
 )
 
 type ClassificationInput struct {
-    Raw            string
-    Shell          string
-    FirstTokenKind FirstTokenKind
+    Raw                 string
+    Shell               string
+    FirstTokenKind      FirstTokenKind
+    ResolvedCommandPath string
 }
 ```
 
-The raw line comes only from stdin. `FirstTokenKind` is a fixed enum supplied by the active shell adapter and is only one piece of evidence; it is not a verdict. The token text remains inside `Raw` and must never be placed in argv.
+The raw line comes only from stdin. `FirstTokenKind` is a fixed enum supplied by the active shell adapter and is only one piece of evidence; it is not a verdict. The token text remains inside `Raw` and must never be placed in argv. `ResolvedCommandPath` is optional shell-produced metadata: it is accepted only for `TokenCommand`, must be an absolute executable path, and identifies the exact file the active shell would run. Standalone CLI use may derive it with `exec.LookPath` for a safe simple head.
 
 Hard behavior before scoring:
 
@@ -814,12 +817,13 @@ type Evidence struct {
 }
 
 type ClassificationResult struct {
-    Version      int            `json:"version"`
-    Outcome      Classification `json:"outcome"`
-    CommandScore int            `json:"command_score"`
-    EnglishScore int            `json:"english_score"`
-    DecisionCode string         `json:"decision_code"`
-    Evidence     []Evidence     `json:"evidence"`
+    Version        int                      `json:"version"`
+    Outcome        Classification           `json:"outcome"`
+    CommandScore   int                      `json:"command_score"`
+    EnglishScore   int                      `json:"english_score"`
+    DecisionCode   string                   `json:"decision_code"`
+    CommandGrammar *commandgrammar.Analysis `json:"command_grammar,omitempty"`
+    Evidence       []Evidence               `json:"evidence"`
 }
 ```
 
@@ -829,7 +833,7 @@ Requirements:
 - Reason codes and weights are stable API and test fixtures. Prose details may evolve.
 - Evidence order is deterministic: hard decisions first, command evidence in a fixed rule order, English evidence in a fixed rule order, then the final decision reason.
 - Do not include raw input in the result by default.
-- The classifier must return the same result for the same input, shell hint, config, and product version.
+- Pure scanning, scoring, and evidence ordering must return the same result for the same inputs. Installed-help analysis additionally depends on the resolved executable and its current output; replacing or upgrading that executable may change the next classification.
 
 Required reason and decision codes include:
 
@@ -851,6 +855,15 @@ conventional_flag
 glob_syntax
 quoted_argument
 path_argument
+command_grammar_recognized
+command_grammar_partial
+command_grammar_undocumented_subcommand
+command_grammar_unknown_option
+command_grammar_missing_option_value
+command_grammar_dynamic_word
+command_grammar_help_unavailable
+command_grammar_help_unparseable
+command_grammar_depth_limit
 natural_instruction_prefix
 natural_question_prefix
 question_mark
@@ -866,11 +879,12 @@ conflicting_strong_evidence
 insufficient_evidence
 known_command_with_natural_language_tail
 unresolved_command_like_input
+command_grammar_uncertain
 ```
 
 ### 7.4 Active-shell command-resolution evidence
 
-Only the active shell process knows the user's aliases, functions, builtins, reserved words, and command hash. Each integration derives a safe first-token-kind hint without executing or expanding the line.
+Only the active shell process knows the user's aliases, functions, builtins, reserved words, command hash, and exact external executable selection. A shell path that invokes `smart` or `classify` derives a safe first-token-kind hint without executing or expanding the line. When the kind is `command`, it also resolves the executable path with the shell's own non-executing lookup (`whence -p` in Zsh; `type -P` for any future Bash classifier callback). The installed Bash callback invokes force-`translate`, so it sends the kind but does not resolve or publish an unused executable path.
 
 Use Zsh-native lexical tokenization, such as the `(z)` parameter-expansion flag, and Zsh command tables or the `whence` builtin. The implementation must:
 
@@ -880,10 +894,10 @@ For Bash, conservatively read the first whitespace-delimited word from `READLINE
 - Pass token values to Zsh builtins with quoting and `--` where supported.
 - Never perform glob expansion, parameter expansion, command substitution, redirection, or execution.
 - Map the result to exactly one fixed enum value: alias, function, builtin, reserved, command, unresolved, empty, or unknown.
-- Pass only the enum in `--first-token-kind`; the actual token remains in stdin.
+- For `smart`/`classify`, pass the enum in `--first-token-kind` and, only for an external command, the validated absolute result in `--resolved-command-path`; the actual token and remainder remain in stdin. Force-`translate` callers pass no resolved path because translation does not inspect command help.
 - Return `unknown` or `unresolved` when tokenization or mapping is uncertain rather than guessing.
 
-A standalone `humansh classify` invocation without an active-shell hint may use `exec.LookPath` for a simple unquoted first word, but it cannot discover active aliases or functions and must remain conservative. Do not spawn an interactive shell or source startup files for each classification.
+A standalone `humansh classify` invocation without a resolved path may use `exec.LookPath` for a safe simple unquoted first word, but it cannot discover active aliases or functions and must remain conservative. Do not spawn an interactive shell or source startup files for command resolution.
 
 Command resolution is not an unconditional verdict. With weak English evidence it can support a `literal` result; with sentence-shaped English evidence it must produce `ambiguous`.
 
@@ -912,6 +926,22 @@ Rules:
 - On malformed quoting, return the features that can be established safely. Do not classify malformed syntax as natural language merely because parsing failed.
 
 `mvdan.cc/sh/v3` may supplement this scanner but cannot replace it because it is not a complete Zsh grammar.
+
+### 7.5.1 Installed-command help analysis
+
+Structured application-command analysis is common Go logic, not a Zsh or Bash adapter responsibility. Define one analyzer interface owned by the classifier and inject its production runtime-help implementation at bootstrap. Both `zle-v1` and `readline-v1` `smart`/`classify` calls use the same implementation. Production must contain no Git-specific schema, static command catalog, command-name switch, or other frozen model of what is installed.
+
+For a resolved external command, open a bounded analysis session for the exact absolute executable path supplied by the shell. If none is supplied to a standalone CLI call, fall back only to `exec.LookPath` for a safe simple head. Reject non-regular, non-executable, set-ID, or otherwise unsafe targets. Resolve once per analysis and use the same path for every recursive probe so a later `PATH` lookup cannot silently select a different executable.
+
+The root probe is exactly `<resolved-executable> --help`. A nested probe is exactly `<resolved-executable> <recognized-subcommand>... --help`, where every prefix word was advertised as a subcommand by the immediately preceding parsed help. Never pass an unrecognized typed word or operand to a probe, and never skip one to recognize a later word. Do not directly invoke `-h`, positional `help`, `man`, shell completion generators, an interactive shell, a shell wrapper, or startup files.
+
+Run every probe in the analysis session with EOF stdin, isolated temporary working/home/XDG directories, a minimal allowlisted environment, stable locale/color/pager settings, bounded stdout and stderr, a short hard timeout, and process-group cancellation. Bound both recursion depth and total probe count. Preserve `PATH` only as the executable may need it for its own help behavior; do not inherit credentials, proxy settings, or unrelated environment variables. Parse useful stdout or stderr even when help returns nonzero, but mark truncated output incomplete. Delete the temporary directories and do not persist or expose raw help output.
+
+The help parser must tolerate common usage/synopsis, commands/subcommands, options/flags, alias, required-value, optional-value, attached-value, ANSI, and overstrike forms without treating arbitrary prose as grammar. It must not promote ambiguous brace-enumerated argument choices to executable subcommands, and it must distinguish explicitly exhaustive command sections from lists labeled common/basic/partial. The analyzer walks the longest documented prefix: global options and their values, subcommands, nested subcommands, node options and their values, `--`, then operands. Annotate words as head, subcommand, option, option value, positional, or unexpected. English-tail rules inspect positional and unexpected roles but exclude recognized option values and quoted payloads.
+
+The raw-free analysis source is `installed_help`. Stable stop reasons include `undocumented_subcommand`, `unknown_option`, `missing_option_value`, `dynamic_shell_word`, `help_unavailable`, `help_unparseable`, and `depth_limit`. A documented structural mismatch or exhausted traversal-depth budget must veto both automatic execution and automatic translation with `ambiguous`/`command_grammar_uncertain`. Help unavailable, unparseable, or truncated before the relevant structure is not proof of invalid syntax; fall back to conservative lexical scoring for the unclassified remainder.
+
+This mechanism is bounded, not sandboxed. The resolved executable is local code and may ignore `--help`, launch plugins or other programs, access the network, daemonize, or perform side effects despite the isolated environment and cancellation. Document this limitation prominently. Humansh never executes the typed line or a generated command through the analyzer. Do not persist a grammar cache in this version: changes to the installed executable are observed by the next classification.
 
 ### 7.6 Command evidence and weights
 
@@ -948,7 +978,7 @@ Use the following initial weights. Apply each reason at most once:
 | `natural_question_prefix` | Begins with a genuine question such as `how do I`, `what is`, `what are`, `where is`, or a grammatical `which ... is/are/uses` clause. | +5 |
 | `question_mark` | Ends with a sentence-style question mark and has no stronger shell-punctuation pattern. | +3 |
 | `ordinary_sentence_structure` | Begins as an explicit English request or has an unresolved first token, then contains at least four ordinary words with sentence-like order and no flags, paths, assignments, or shell operators. | +3 |
-| `natural_language_tail` | A resolved command word is followed by at least two ordinary words, at least one of which is in the versioned grammar lexicon below, with no flags, paths, operators, assignments, or command syntax. A single identifier such as `which git` does not match. Suppress this rule for the explicit negative list described below. | +4 |
+| `natural_language_tail` | A resolved command has an inspectable tail with at least two ordinary words, at least one of which is in the versioned grammar lexicon below, and no tail shell markers. With usable installed help, inspect only positional/unexpected grammar roles; otherwise use the conservative lexical fallback. A single identifier such as `which git` does not match. | +4 |
 | `natural_clause` | After an explicit English prefix, an unresolved first token, or an actual `natural_language_tail` match, contains a clause such as `is using`, `that were`, `in this folder`, `from the last`, `modified today`, `changed during`, or `by size`. For a resolved command head, a merely grammar-bearing tail is insufficient: `natural_language_tail` must have fired. | +3 |
 | `unresolved_first_token` | First token is unresolved or unknown in active Zsh. | +2 |
 | `mostly_ordinary_words` | Fires only after `natural_instruction_prefix`, `natural_question_prefix`, `ordinary_sentence_structure`, `natural_language_tail`, or `natural_clause`; at least 75% of non-head tokens must be alphabetic ordinary words, there must be at least two such tokens, and the line must contain no flags, paths, operators, assignment token containing `=`, substitutions, or glob syntax. | +2 |
@@ -981,9 +1011,9 @@ Important details:
 
 - A resolved first word is not enough to defeat a grammar-bearing English tail. Use the same grammatical rule for `find`, `open`, `watch`, `top`, `who`, `make`, `head`, `test`, and any other resolved command word. `which git` is literal; `which process is using port 3000` is ambiguous.
 - `unresolved_first_token` is intentionally weak. It must not turn `gti status` or `foo bar baz` into natural language by itself.
-- Keep a small, explicit, versioned **negative list** for commands whose normal operands are commonly bare English-looking words. The initial exact set is `echo`, `print`, `printf`, `man`, `git`, `docker`, `kubectl`, `npm`, `pnpm`, `yarn`, `cargo`, `brew`, `gh`, `humansh`, `codex`, `claude`, `cursor`, `cursor-agent`, and `agent`; changes require corpus fixtures and release notes. For these heads, suppress `natural_language_tail`; consequently they cannot qualify for `natural_clause` or `mostly_ordinary_words` through a tail. A separate rule that independently fires, such as a line-leading strong English prefix/question, may still contribute normally. This keeps `echo show me the files`, `docker ps that were running`, and ordinary subcommand invocations literal. Prefer adding a justified negative exception over creating a positive list of command names; the default for a grammar-bearing tail must fail toward `ambiguous`, not execution.
+- Do not maintain a command-name negative list or any command-specific exception in production. For external commands with usable help, roles decide which words are inspectable; aliases, functions, builtins, reserved words, unresolved heads, and unavailable/unparseable help use the same conservative lexical fallback.
 - English structural rules must not fire on arbitrary quoted payloads after a resolved command.
-- Keep the grammar lexicon and negative list small, explicit, versioned, and test-backed. Do not add a probabilistic NLP library or remote classifier in the MVP.
+- Keep the grammar lexicon small, explicit, versioned, and test-backed. Do not add a probabilistic NLP library or remote classifier in the MVP.
 
 ### 7.8 Decision algorithm
 
@@ -1017,7 +1047,8 @@ A command score of 5 and English score of 3 or 4 is also ambiguous. This conserv
 
 Additional decision labeling:
 
-- `DecisionCode` is always exactly one of the four strings returned by `decide()`: `strong_command_weak_english`, `strong_english_weak_command`, `conflicting_strong_evidence`, or `insufficient_evidence`.
+- `DecisionCode` normally uses one of the four strings returned by `decide()`: `strong_command_weak_english`, `strong_english_weak_command`, `conflicting_strong_evidence`, or `insufficient_evidence`.
+- If parsed installed help establishes a structural mismatch against an explicitly exhaustive list, or reaches the traversal-depth limit, and score thresholds would otherwise return `literal` or `natural_language`, override the result to `ambiguous` with `command_grammar_uncertain`. Retain `conflicting_strong_evidence` when the scores already produce `ambiguous`. Absence from a list labeled common/basic/partial, and help-unavailable or help-unparseable states alone, do not trigger this veto.
 - Append the primary `DecisionCode` to `Evidence` as zero-weight `DecisionEvidence` after command and English evidence; append any secondary decision labels after it in deterministic order.
 - When the first token resolves and the English score is at least 3, append `Evidence{Domain: DecisionEvidence, Code: "known_command_with_natural_language_tail", Weight: 0}` as a secondary decision label.
 - When the first token is unresolved, neither side is strong, and the line looks like a short command invocation, append `Evidence{Domain: DecisionEvidence, Code: "unresolved_command_like_input", Weight: 0}` as a secondary decision label.
@@ -1033,10 +1064,17 @@ These are normative examples for the initial implementation:
 | Input | Shell hint | Expected | Rationale |
 |---|---|---|---|
 | `git status` | command | literal | Resolved command; no English evidence. |
+| `git --no-pager status --short` | command | literal | The installed help documents the global option, subcommand, and leaf option. |
+| `git commit -m "please authenticate"` | command | literal | The installed help marks the message option's value, which is excluded from intent detection. |
+| `git is failing please authenticate` | command | ambiguous | The installed help does not document `is` as a subcommand and the unexpected remainder is strongly English. |
+| `git status is failing please authenticate` | command | ambiguous | Valid-looking pathspec operands remain inspectable for intent. |
+| `fixturevcs statsu` with an exhaustive `Available Commands` list | command | ambiguous | The installed help explicitly exhausts its command list and does not document the word. |
+| `git status --porcelian` | command | ambiguous | Unknown option at a sufficiently parsed help node fails closed. |
+| `git -C` | command | ambiguous | Help documents an option whose required value is missing. |
 | `ls -lah ~/Downloads` | command | literal | Resolved command, flag, and path. |
 | `FOO=bar` | unresolved | literal | Explicit assignment syntax. |
 | `cat file.txt | grep error` | command | literal | Resolved command and pipeline. |
-| `echo show me the files` | builtin or command | literal | English phrase is not at the beginning; resolved command dominates. |
+| `echo show me the files` | builtin | ambiguous | Builtins are not runtime-help probed; the command head and grammatical bare tail conflict without a command-name exception. |
 | `echo "show me the files"` | builtin or command | literal | Quoted payload is not treated as user intent. |
 | `which git` | command | literal | Normal invocation of `which`. |
 | `open README.md` | command | literal | Resolved macOS command and path-like argument. |
@@ -1133,7 +1171,8 @@ How to proceed in Zsh:
   Ctrl-G translates the request.
   Ctrl-X, Enter runs it exactly as written.
 
-Nothing was executed and no AI provider was contacted.
+The typed line was not executed and no AI provider was contacted.
+The resolved executable may have been invoked only for bounded `--help` inspection.
 ```
 
 JSON output should follow the `ClassificationResult` schema. Do not emit localized prose in reason codes. Human-readable text may be localized later.
@@ -1167,13 +1206,13 @@ open the project folder
 
 ### 7.14 Performance, privacy, and tuning
 
-- Classification performs no network I/O and no provider call.
-- The active-shell hint avoids spawning a new Zsh process for each Enter press.
-- Do not persist raw inputs or classification results by default.
+- Humansh performs no network I/O and no provider call for classification; an installed executable invoked for help is outside that guarantee and may ignore the minimal environment.
+- The active-shell hint avoids spawning a new shell for each Enter press and identifies the exact external executable for bounded help probes.
+- Do not persist raw inputs, raw help output, discovered grammar, or classification results by default.
 - Debug output may show local evidence only when explicitly requested and must follow the input-logging opt-in rules.
 - No classifier telemetry in the MVP.
 - Tune weights only through the checked-in table-driven corpus, explicit regression tests, and release-reviewed changes.
-- Benchmark both the pure classifier function and end-to-end `humansh classify` process startup.
+- Benchmark the pure classifier and help parser separately from bounded fake-help subprocess analysis and end-to-end `humansh classify` startup.
 
 ---
 
@@ -2464,7 +2503,9 @@ Cover at least:
 - Explicit English instructions and questions.
 - Natural-language clauses after real command names.
 - Grammar-bearing English tails after resolved command names outside the old six-command set, including `watch the logs`, `top processes by memory`, `who is using port 80`, `make it faster`, `head to the downloads folder`, and `test if the port is open`.
-- Negative-list heads with legitimate English-looking operands, including `echo`, `print`, `printf`, `man`, `git`, and representative subcommand CLIs.
+- Builtins, aliases, functions, and unavailable/unparseable help with legitimate English-looking operands, proving the fallback has no command-name exceptions.
+- Generic installed-help traversal through compiled fake executables, including global options, nested subcommands, attached/separate option values, `--`, inspectable positionals, undocumented subcommands, incomplete help, unknown options, and missing values.
+- Common Cobra, Click, clap, argparse, Git-like, ANSI, and overstrike help formats as parser fixtures; no production fixture may become a command-specific schema.
 - Short unresolved command-like inputs and likely typos.
 - Empty input, comments, multiline input, and malformed quotes.
 - Unicode words and punctuation.
@@ -2476,14 +2517,16 @@ Normative examples include:
 
 ```text
 git status                                      → literal
+git --no-pager status --short                   → literal
+git commit -m "please authenticate"             → literal
 ls -lah ~/Downloads                             → literal
 FOO=bar                                         → literal
 cd ~/Downloads                                  → literal
 find . -type f -mtime -1                        → literal
 cat file.txt | grep error                       → literal
 echo 'show me files | sorted by size'           → literal
-echo show me the files                          → literal
-docker ps that were running                    → literal
+echo show me the files                          → ambiguous
+docker ps that were running                    → ambiguous
 which git                                       → literal
 open README.md                                  → literal
 not-a-command > existing-file                   → literal
@@ -2502,6 +2545,11 @@ who is using port 80                            → ambiguous
 make it faster                                  → ambiguous
 head to the downloads folder                   → ambiguous
 test if the port is open                       → ambiguous
+git is failing please authenticate              → ambiguous
+git status is failing please authenticate       → ambiguous
+fixturevcs statsu  # exhaustive fake help       → ambiguous
+git status --porcelian                          → ambiguous
+git -C                                          → ambiguous
 gti status                                      → ambiguous
 foo bar baz                                     → ambiguous
 rm -rf build                                    → literal
@@ -2516,19 +2564,25 @@ Add focused tests proving:
 5. A sentence-ending `?` is not treated as a glob, while `file?.txt` is.
 6. Leading and repeated whitespace does not change the semantic result.
 7. Classification never changes the raw buffer.
-8. Classification performs no provider call, network call, command execution, glob expansion, or shell startup-file sourcing.
-9. Evidence ordering and reason codes are deterministic.
+8. Classification performs no provider call, executes neither the typed line nor a generated command, and performs no glob expansion or shell startup-file sourcing. Runtime tests permit only the controlled fake executable's bounded help probes.
+9. Pure evidence ordering and reason codes are deterministic; runtime-help results are stable for the same resolved fake executable and help output.
 10. The JSON output omits raw input by default.
 11. Command overrides are case-sensitive exact first-word matches.
 12. English-prefix overrides are case-insensitive and whitespace-normalized.
 13. Conflicting overrides produce `ambiguous` and an actionable diagnostic.
 14. `Ctrl-G` and `Ctrl-X Enter` remain available regardless of overrides.
-15. `DecisionCode` is always one of the four threshold-decision codes; `known_command_with_natural_language_tail` and `unresolved_command_like_input` appear only as zero-weight `decision` evidence.
+15. `DecisionCode` is one of the four threshold-decision codes or the fail-closed `command_grammar_uncertain` veto; `known_command_with_natural_language_tail` and `unresolved_command_like_input` appear only as zero-weight `decision` evidence.
 16. `mostly_ordinary_words` follows its exact prerequisite and disqualifier rules, including that `FOO=bar` cannot receive it.
 17. No normative row's expected decision code depends on an unspecified signal or sits accidentally on a threshold.
 18. Every `grammar-tail-v1` entry is recognized as a whole normalized word, substrings do not match, and adding/removing an entry requires an intentional corpus change.
 19. `find all files modified today` requires `natural_language_tail` with weight `+4`, and `make it faster` does likewise; neither may fall through to literal.
-20. `docker ps that were running` remains literal and forbids `natural_language_tail`, `natural_clause`, and `mostly_ordinary_words`, proving the negative list cannot be bypassed through dependent rules.
+20. Production grammar behavior contains no command-name catalog, negative list, or Git-specific branch; the same compiled fake executable can be installed under arbitrary names without changing the result.
+21. `git is failing please authenticate` is ambiguous under both Zsh and Bash protocol inputs when the supplied fake resolved executable advertises Git-like commands; it retains the raw buffer and never calls a provider.
+22. Documented options and their values are consumed before intent scoring; quoted/free-form option values do not become English evidence.
+23. Undocumented subcommands in explicitly exhaustive lists, unknown options at sufficiently parsed nodes, missing required option values, and exhausted traversal depth produce `command_grammar_uncertain`, never automatic execution or translation. Unlisted words after explicitly partial command lists, help-unavailable, help-unparseable, and truncated-before-the-relevant-structure cases fall back rather than inventing invalid syntax.
+24. Every probe directly invokes the exact supplied fake path with only a recognized prefix plus `--help`; no test permits an unrecognized user word, `-h`, positional `help`, `man`, completion, a shell wrapper, startup files, or inherited secrets in probe argv/environment.
+25. Runtime probes enforce timeout, output, depth, total-probe, EOF-stdin, isolated-directory, and process-group cancellation behavior using controlled fake executables. Tests explicitly acknowledge that these bounds are not a sandbox.
+26. Replacing the fake executable or its advertised help affects the next classification, proving there is no persistent static grammar cache.
 
 Add integration tests around `humansh smart` with a fake provider call counter:
 
@@ -2537,9 +2591,9 @@ Add integration tests around `humansh smart` with a fake provider call counter:
 - Natural-language input invokes the provider exactly once.
 - Force translation bypasses classification and invokes the provider exactly once.
 
-Add fuzz tests for the pure scanner and classifier. For arbitrary byte strings accepted by Go strings, assert that the code never panics, hangs, executes anything, performs network I/O, or returns an outcome outside the three allowed values. Bound input size in fuzz tests to keep CI reliable.
+Add fuzz tests for the pure scanner, help parser, and classifier with an injected in-memory analyzer. For arbitrary byte strings accepted by Go strings, assert that the pure code never panics, hangs, executes anything, performs network I/O, or returns an outcome outside the three allowed values. Bound input size in fuzz tests to keep CI reliable; do not point a fuzzer at arbitrary installed executables.
 
-Add benchmarks for the pure classifier, `humansh classify`, and end-to-end `humansh smart` with clear literal input. Record raw machine-specific timings, enforce the pure-classifier target, and give the literal smart path a generous calibrated CI ceiling that catches material startup/config regressions without treating minor runner variance as failure.
+Add benchmarks for the pure classifier, the help parser, bounded fake-executable analysis, `humansh classify`, and end-to-end `humansh smart` with clear literal input. Record raw machine-specific timings, enforce the pure-classifier target, and give runtime-help and literal-smart paths generous calibrated CI ceilings that catch missing bounds or material startup/config regressions without treating minor runner variance as failure.
 
 ### 20.2 Validator tests
 
@@ -2709,7 +2763,7 @@ Required scenarios:
 7. `Ctrl-G` forces translation of ambiguous input.
 8. Ambiguous smart input remains unchanged and makes no provider call.
 9. `which process is using port 3000`, `open the project folder`, and `gti status` remain ambiguous.
-10. `echo show me the files` and `which git` delegate as literal commands.
+10. `echo show me the files` remains ambiguous without a command-name exception, while `which git` delegates as a literal command.
 11. A configured command override is literal, and a configured English-prefix override is translated.
 12. Provider auth error leaves buffer/cursor unchanged, no stderr bytes leak directly into the terminal, and the repair command is displayed through `zle -M` without corrupting redisplay.
 13. A fake provider blocks for at least two seconds; the PTY observes at least two distinct loader frames beside `Translating with <provider>…` before completion, proving that `zle -M` and `zle -R` refresh throughout the call.
@@ -2841,8 +2895,9 @@ Explain:
 - How to add or remove local classifier overrides.
 - Why the LLM is never used to authorize execution or break ties.
 - How contributors must update the corpus when changing classifier behavior.
-- The grammar-gated resolved-command-tail rule, its negative exceptions, and why the classifier fails these conflicts toward `ambiguous` rather than maintaining a six-command positive list.
-- The exact `grammar-tail-v1` lexicon and negative-list entries, their versioning rules, and corpus cases proving `all`, `it`, and negative-list dependency suppression.
+- The role-aware resolved-command-tail rule, generic runtime help discovery, and why documented structural or intent conflicts fail toward `ambiguous`.
+- Exact executable resolution, bounded fixed `--help` probes, parser/fallback behavior, the absence of command-specific schemas and negative lists, and why help execution is not a sandbox.
+- The exact `grammar-tail-v1` lexicon, its versioning rules, and corpus cases proving `all`, `it`, generic help segmentation, and lexical-fallback behavior.
 
 ### `docs/providers.md`
 
@@ -2867,6 +2922,7 @@ Document:
 - Threat model.
 - No auto-execution invariant.
 - Provider isolation.
+- The installed-command help-analysis trust boundary: exact-path fixed probes, environment/time/output/traversal bounds, no unrecognized user tail, and the explicit warning that this is not a sandbox and may side-effect.
 - What data is sent.
 - Credential storage.
 - Risk-gating behavior.
@@ -2882,7 +2938,7 @@ Include exact, copyable fixes for all major errors. Organize by shell setup, Cod
 
 ### `docs/architecture.md`
 
-Explain the four mandatory modules (`app`, `llm`, `shell`, and `config`), the composition root, allowed and forbidden dependency directions, interface contracts, configuration flow, the managed-block export boundary for typed shell settings, the immutable/hashed Zsh asset, the active-shell resolution-hint boundary, the local evidence-scoring pipeline, and step-by-step procedures for adding a future provider or shell adapter without changing main logic. Include a dependency diagram that matches the actual packages.
+Explain the four mandatory modules (`app`, `llm`, `shell`, and `config`), the composition root, allowed and forbidden dependency directions, interface contracts, configuration flow, the managed-block export boundary for typed shell settings, immutable/hashed shell assets, the active-shell exact-executable resolution boundary, the shared runtime-help analyzer and its safety limits, the local evidence-scoring pipeline, and step-by-step procedures for adding a future provider or shell adapter without changing main logic. Include a dependency diagram that matches the actual packages.
 
 ---
 
@@ -2901,6 +2957,7 @@ git status
 Expected:
 
 - No provider call.
+- Bounded help inspection may run the exact installed Git before classification completes.
 - Existing Enter behavior runs.
 - Normal Git output appears.
 
@@ -2953,7 +3010,7 @@ find all large files
 Expected:
 
 - Buffer unchanged.
-- Nothing executed.
+- The typed line did not execute; bounded installed-command help probes may have run.
 - No provider call.
 - Message explains `Ctrl-G` versus `Ctrl-X Enter`.
 
@@ -2985,7 +3042,7 @@ Expected:
 - Command score and English score are both shown.
 - Evidence includes `resolved_first_token` plus sentence or clause evidence.
 - The output explains `Ctrl-G` and `Ctrl-X Enter`.
-- It explicitly says that nothing executed and no provider was contacted.
+- It explicitly says that the typed line was not executed and no provider was contacted. It may report that bounded installed-command help inspection occurred.
 
 Run again with `--json`. The result follows the versioned classifier schema, uses stable reason codes, and omits the raw input.
 
@@ -3204,7 +3261,7 @@ Complete all phases in the same implementation effort; do not stop after a phase
 - Create the thin `bootstrap` composition root.
 - Add import-boundary tests immediately.
 - Implement config paths, typed schemas, atomic storage, install state, secret-store abstraction, and in-memory test implementations.
-- Implement shared response schema, non-executing lexical scanner, two-score three-way classifier, local overrides, explainability output, validation, risk engine, prompt builder, and process runner.
+- Implement shared response schema, non-executing lexical scanner, two-score three-way classifier, generic bounded installed-help analyzer/parser, local overrides, explainability output, validation, risk engine, prompt builder, and process runner.
 
 ### Phase 2: LLM integration module
 
@@ -3267,7 +3324,9 @@ The implementation is done only when:
 - Clear Zsh commands run without an LLM call; Bash ordinary Enter never calls the LLM.
 - Natural language becomes a reviewed command in the existing Zsh or Bash buffer.
 - Classification uses independent command and English evidence scores with stable, inspectable reason codes.
-- The versioned grammar-tail lexicon is fully enumerated and corpus-tested; negative-list heads cannot regain tail evidence through dependent rules.
+- A shared Go command-grammar interface recursively segments subcommands/options discovered from the exact installed executable for both shell protocol inputs, with no command-specific production schema.
+- Runtime help probes use only recognized prefixes plus fixed `--help`, enforce environment/time/output/depth/count/cancellation bounds, never run `man` or completion code, and document that the executable is not sandboxed.
+- The versioned grammar-tail lexicon is fully enumerated and corpus-tested; the fallback contains no command-name negative list.
 - A resolved command name does not override strong English evidence; mixed cases remain ambiguous.
 - Short unresolved command-like input is not silently translated.
 - Ambiguous input is never guessed by default and never causes a provider call.

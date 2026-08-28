@@ -17,7 +17,7 @@ func main() {
 	input := string(inputBytes)
 	if path := os.Getenv("HUMANSH_FAKE_CALLS"); path != "" {
 		if file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
-			_, _ = fmt.Fprintf(file, "%s|%s\n", mode, strings.ReplaceAll(input, "\n", `\n`))
+			_, _ = fmt.Fprintf(file, "%s|%s|argv=%q\n", mode, strings.ReplaceAll(input, "\n", `\n`), os.Args[2:])
 			_ = file.Close()
 		}
 	}

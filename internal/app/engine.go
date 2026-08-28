@@ -16,7 +16,7 @@ import (
 )
 
 type Classifier interface {
-	Classify(classifier.Input) classifier.Result
+	ClassifyContext(context.Context, classifier.Input) classifier.Result
 }
 type LocalValidator interface {
 	Response(llm.TranslationResponse) error
@@ -38,12 +38,13 @@ type Engine struct {
 }
 
 type RuntimeRequest struct {
-	Input          string
-	ShellID        shell.ID
-	FirstTokenKind shell.FirstTokenKind
-	WorkingDir     string
-	Config         config.RuntimeConfig
-	Overrides      config.ClassifierOverrides
+	Input               string
+	ShellID             shell.ID
+	FirstTokenKind      shell.FirstTokenKind
+	ResolvedCommandPath string
+	WorkingDir          string
+	Config              config.RuntimeConfig
+	Overrides           config.ClassifierOverrides
 }
 
 type Result struct {
@@ -56,7 +57,10 @@ type Result struct {
 }
 
 func (e Engine) Smart(ctx context.Context, request RuntimeRequest) (Result, error) {
-	classification := e.Classifier.Classify(classifier.Input{Raw: request.Input, Shell: string(request.ShellID), FirstTokenKind: request.FirstTokenKind, Overrides: request.Overrides})
+	classification := e.Classifier.ClassifyContext(ctx, classifier.Input{Raw: request.Input, Shell: string(request.ShellID), FirstTokenKind: request.FirstTokenKind, ResolvedCommandPath: request.ResolvedCommandPath, Overrides: request.Overrides})
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
 	switch classification.Outcome {
 	case classifier.Literal:
 		return Result{ExitCode: protocol.ExitLiteral, Classification: &classification}, nil

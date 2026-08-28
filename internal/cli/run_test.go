@@ -16,6 +16,8 @@ import (
 
 	"github.com/agenticlab-ai/humansh/internal/app"
 	"github.com/agenticlab-ai/humansh/internal/bootstrap"
+	"github.com/agenticlab-ai/humansh/internal/classifier"
+	"github.com/agenticlab-ai/humansh/internal/commandgrammar"
 	"github.com/agenticlab-ai/humansh/internal/config"
 	usererr "github.com/agenticlab-ai/humansh/internal/errors"
 	"github.com/agenticlab-ai/humansh/internal/llm"
@@ -87,6 +89,24 @@ func TestClassifyJSONIncludesHintAndRejectsPositionals(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("positional input accepted: code=%d out=%s err=%s", code, out.String(), errOut.String())
 	}
+	out.Reset()
+	errOut.Reset()
+	code = Run(context.Background(), []string{"classify", "--first-token-kind", "command", "--resolved-command-path", "relative/tool"}, IO{In: strings.NewReader("tool status"), Out: &out, Err: &errOut})
+	if code != 2 || !strings.Contains(errOut.String(), "invalid --resolved-command-path") {
+		t.Fatalf("relative resolved path accepted: code=%d out=%s err=%s", code, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	code = Run(context.Background(), []string{"classify", "--first-token-kind", "builtin", "--resolved-command-path", "/bin/echo"}, IO{In: strings.NewReader("echo value"), Out: &out, Err: &errOut})
+	if code != 2 || !strings.Contains(errOut.String(), "invalid --resolved-command-path") {
+		t.Fatalf("resolved path accepted for non-command token: code=%d out=%s err=%s", code, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	code = Run(context.Background(), []string{"translate", "--first-token-kind", "command", "--resolved-command-path", "/bin/echo"}, IO{In: strings.NewReader("echo value"), Out: &out, Err: &errOut})
+	if code != 2 || !strings.Contains(errOut.String(), "only valid for smart") {
+		t.Fatalf("forced translation accepted unused resolved path: code=%d out=%s err=%s", code, out.String(), errOut.String())
+	}
 }
 
 func TestMachineFlagsRejectValuesOutsideFixedEnums(t *testing.T) {
@@ -133,8 +153,8 @@ func TestClassifyZLEStatusHintIsLocalAndFixed(t *testing.T) {
 		// The translate hint carries the provider label so the widget can show
 		// "Translating with <provider>…" without spawning humansh at shell startup.
 		{"show me files", "unresolved", "translate Codex"},
-		{"git status", "command", ""},
-		{"find all files modified today", "command", ""},
+		{"pwd", "builtin", "literal"},
+		{"gti status", "unresolved", "ambiguous"},
 	} {
 		var out, errOut bytes.Buffer
 		code := Run(context.Background(), []string{"classify", "--zle-status", "--first-token-kind", test.kind}, IO{In: strings.NewReader(test.input), Out: &out, Err: &errOut})
@@ -626,11 +646,94 @@ func TestClassifyAndLiteralProtocol(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	code = Run(context.Background(), []string{"smart", "--protocol", "zle-v1", "--shell", "zsh", "--first-token-kind", "command"}, IO{In: strings.NewReader("git status"), Out: &out, Err: &errOut})
+	code = Run(context.Background(), []string{"smart", "--protocol", "zle-v1", "--shell", "zsh", "--first-token-kind", "command"}, IO{In: strings.NewReader("fixture status"), Out: &out, Err: &errOut})
 	if code != protocol.ExitLiteral || out.Len() != 0 || errOut.Len() != 0 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 }
+
+func TestCommandGrammarIsSharedAcrossShellProtocols(t *testing.T) {
+	isolatedEnv(t)
+	resolvedPath := "/fixture/bin/git"
+	runtime, err := bootstrap.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.Engine.Classifier = classifier.Classifier{Invocations: commandgrammar.NewAnalyzer(sharedProtocolHelpSource{})}
+	tests := []struct {
+		shellID string
+		version string
+	}{
+		{shellID: "zsh", version: protocol.Version},
+		{shellID: "bash", version: protocol.ReadlineVersion},
+	}
+	var classifications []string
+	for _, test := range tests {
+		var out, errOut bytes.Buffer
+		commonFlags := []string{"--shell", test.shellID, "--first-token-kind", "command", "--resolved-command-path", resolvedPath}
+		smartArgs := append([]string{"smart", "--protocol", test.version}, commonFlags...)
+		code := runProtocol(context.Background(), "smart", smartArgs[1:], runtime, IO{In: strings.NewReader("git is failing please authenticate"), Out: &out, Err: &errOut})
+		if code != protocol.ExitAmbiguous || out.Len() != 0 || !strings.Contains(errOut.String(), "Not sure whether this is English or a command") {
+			t.Fatalf("shell=%s code=%d stdout=%q stderr=%q", test.shellID, code, out.String(), errOut.String())
+		}
+		for _, literal := range []string{"git status", `git commit -m "please authenticate"`} {
+			out.Reset()
+			errOut.Reset()
+			code = runProtocol(context.Background(), "smart", smartArgs[1:], runtime, IO{In: strings.NewReader(literal), Out: &out, Err: &errOut})
+			if code != protocol.ExitLiteral || out.Len() != 0 || errOut.Len() != 0 {
+				t.Fatalf("shell=%s input=%q code=%d stdout=%q stderr=%q", test.shellID, literal, code, out.String(), errOut.String())
+			}
+		}
+
+		out.Reset()
+		errOut.Reset()
+		classifyArgs := append([]string{"classify", "--json"}, commonFlags...)
+		code = runClassify(context.Background(), classifyArgs[1:], runtime, IO{In: strings.NewReader("git is failing please authenticate"), Out: &out, Err: &errOut})
+		if code != 0 || errOut.Len() != 0 || !strings.Contains(out.String(), `"source": "installed_help"`) || !strings.Contains(out.String(), `"command_grammar_undocumented_subcommand"`) || strings.Contains(out.String(), resolvedPath) || strings.Contains(out.String(), "failing please authenticate") {
+			t.Fatalf("shell=%s classify code=%d stdout=%q stderr=%q", test.shellID, code, out.String(), errOut.String())
+		}
+		classifications = append(classifications, out.String())
+	}
+	if len(classifications) != 2 || classifications[0] != classifications[1] {
+		t.Fatalf("shell protocols produced different shared classifications:\nzsh=%s\nbash=%s", classifications[0], classifications[1])
+	}
+}
+
+type sharedProtocolHelpSource struct{}
+
+func (sharedProtocolHelpSource) Open(context.Context, commandgrammar.ExecutableRef) (commandgrammar.HelpSession, error) {
+	return sharedProtocolHelpSession{}, nil
+}
+
+type sharedProtocolHelpSession struct{}
+
+func (sharedProtocolHelpSession) Load(_ context.Context, prefix []string) commandgrammar.HelpResult {
+	root := commandgrammar.NodeSpec{
+		Options: map[string]commandgrammar.OptionSpec{"--no-pager": {}}, OptionsKnown: true,
+		Subcommands: map[string]struct{}{"status": {}, "commit": {}}, SubcommandState: commandgrammar.SubcommandsListed,
+		SubcommandsComplete: true, Complete: true,
+	}
+	status := commandgrammar.NodeSpec{
+		Options: map[string]commandgrammar.OptionSpec{"--short": {}}, OptionsKnown: true,
+		SubcommandState: commandgrammar.SubcommandsNone, Complete: true,
+	}
+	commit := commandgrammar.NodeSpec{
+		Options: map[string]commandgrammar.OptionSpec{"-m": {Value: commandgrammar.RequiredValue, AllowSeparate: true}}, OptionsKnown: true,
+		SubcommandState: commandgrammar.SubcommandsNone, Complete: true,
+	}
+	switch strings.Join(prefix, " ") {
+	case "":
+		return commandgrammar.HelpResult{Node: root, Status: commandgrammar.HelpOK}
+	case "status":
+		return commandgrammar.HelpResult{Node: status, Status: commandgrammar.HelpOK}
+	case "commit":
+		return commandgrammar.HelpResult{Node: commit, Status: commandgrammar.HelpOK}
+	default:
+		return commandgrammar.HelpResult{Status: commandgrammar.HelpUnavailable}
+	}
+}
+
+func (sharedProtocolHelpSession) Close() error { return nil }
 
 func TestSetupAndClassifierStdin(t *testing.T) {
 	home := isolatedEnv(t)

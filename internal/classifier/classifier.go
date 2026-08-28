@@ -1,14 +1,18 @@
 package classifier
 
 import (
+	"context"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode"
 
+	"github.com/agenticlab-ai/humansh/internal/commandgrammar"
 	"github.com/agenticlab-ai/humansh/internal/config"
 	"github.com/agenticlab-ai/humansh/internal/shell"
 )
+
+const resultVersion = 2
 
 type Classification string
 
@@ -34,23 +38,33 @@ type Evidence struct {
 }
 
 type Input struct {
-	Raw            string
-	Shell          string
-	FirstTokenKind shell.FirstTokenKind
-	Overrides      config.ClassifierOverrides
+	Raw                 string
+	Shell               string
+	FirstTokenKind      shell.FirstTokenKind
+	ResolvedCommandPath string
+	Overrides           config.ClassifierOverrides
 }
 
 type Result struct {
-	Version        int                  `json:"version"`
-	FirstTokenKind shell.FirstTokenKind `json:"first_token_kind,omitempty"`
-	Outcome        Classification       `json:"outcome"`
-	CommandScore   int                  `json:"command_score"`
-	EnglishScore   int                  `json:"english_score"`
-	DecisionCode   string               `json:"decision_code"`
-	Evidence       []Evidence           `json:"evidence"`
+	Version        int                      `json:"version"`
+	FirstTokenKind shell.FirstTokenKind     `json:"first_token_kind,omitempty"`
+	Outcome        Classification           `json:"outcome"`
+	CommandScore   int                      `json:"command_score"`
+	EnglishScore   int                      `json:"english_score"`
+	DecisionCode   string                   `json:"decision_code"`
+	CommandGrammar *commandgrammar.Analysis `json:"command_grammar,omitempty"`
+	Evidence       []Evidence               `json:"evidence"`
 }
 
-type Classifier struct{}
+// InvocationAnalyzer is the shared command-grammar boundary used regardless of
+// whether input arrived through the Zsh or Bash protocol.
+type InvocationAnalyzer interface {
+	Analyze(context.Context, commandgrammar.Invocation) commandgrammar.Analysis
+}
+
+type Classifier struct {
+	Invocations InvocationAnalyzer
+}
 
 var (
 	assignmentRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
@@ -73,8 +87,6 @@ about after at before by during for from if in into of on over through to under 
 
 var stopwords = wordSet(`the a an my me those these this that is are was were in during of to from by for it all`)
 
-var negativeTailHeads = wordSet(`echo print printf man git docker kubectl npm pnpm yarn cargo brew gh humansh codex claude cursor cursor-agent agent`)
-
 var naturalClauses = []string{
 	"is using", "are using", "that were", "in this folder", "from the last", "modified today", "changed today",
 	"changed during", "by size", "by memory", "is listening", "were running", "to the", "if the", "it faster",
@@ -88,7 +100,11 @@ func wordSet(words string) map[string]struct{} {
 	return out
 }
 
-func (Classifier) Classify(in Input) Result {
+func (c Classifier) Classify(in Input) Result {
+	return c.ClassifyContext(context.Background(), in)
+}
+
+func (c Classifier) ClassifyContext(ctx context.Context, in Input) Result {
 	raw := in.Raw
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -117,6 +133,8 @@ func (Classifier) Classify(in Input) Result {
 	if englishOverride {
 		return hard(in.FirstTokenKind, Natural, "configured_english_prefix")
 	}
+
+	grammar := c.analyzeInvocation(ctx, in, scan)
 
 	var commandEvidence, englishEvidence []Evidence
 	add := func(dst *[]Evidence, domain EvidenceDomain, code string, weight int, detail string) {
@@ -155,6 +173,10 @@ func (Classifier) Classify(in Input) Result {
 	if scan.pathArgument {
 		add(&commandEvidence, CommandEvidence, "path_argument", 2, "contains a path-like argument")
 	}
+	if grammar != nil {
+		code, detail := grammarEvidence(*grammar)
+		add(&commandEvidence, CommandEvidence, code, 0, detail)
+	}
 
 	normalized := normalizeWords(trimmed)
 	words := ordinaryWords(scan.tokens)
@@ -174,9 +196,22 @@ func (Classifier) Classify(in Input) Result {
 	if ordinaryStructure {
 		add(&englishEvidence, EnglishEvidence, "ordinary_sentence_structure", 3, "contains at least four ordinary words in sentence order")
 	}
-	tail := resolved(in.FirstTokenKind) && !setHas(negativeTailHeads, strings.ToLower(first)) && grammarTail(scan.tokens) && noShellMarkers
+	tailTokens := []token(nil)
+	tailMarkersClear := noShellMarkers
+	if grammar != nil {
+		tailTokens = inspectableGrammarTail(scan.tokens, *grammar)
+		tailMarkersClear = grammarTailHasNoShellMarkers(scan, tailTokens)
+	} else if len(scan.tokens) > 1 {
+		tailTokens = scan.tokens[1:]
+	}
+	tailAllowed := resolved(in.FirstTokenKind)
+	tail := tailAllowed && grammarBearing(tailTokens) && tailMarkersClear
 	if tail {
-		add(&englishEvidence, EnglishEvidence, "natural_language_tail", 4, "resolved command is followed by a grammar-bearing English tail")
+		detail := "resolved command is followed by a grammar-bearing English tail"
+		if grammar != nil {
+			detail = "installed command help leaves a grammar-bearing English tail"
+		}
+		add(&englishEvidence, EnglishEvidence, "natural_language_tail", 4, detail)
 	}
 	clause := containsClause(normalized) && (instruction || in.FirstTokenKind == shell.TokenUnresolved || in.FirstTokenKind == shell.TokenUnknown || tail)
 	if clause {
@@ -186,14 +221,27 @@ func (Classifier) Classify(in Input) Result {
 		add(&englishEvidence, EnglishEvidence, "unresolved_first_token", 2, "first token is unresolved in the active shell")
 	}
 	structural := instruction || question || ordinaryStructure || tail || clause
-	if structural && mostlyOrdinary(scan.tokens) && noShellMarkers && !scan.containsEquals {
+	ordinaryTail := []token(nil)
+	if len(scan.tokens) > 1 {
+		ordinaryTail = scan.tokens[1:]
+	}
+	ordinaryMarkersClear := noShellMarkers
+	if tail {
+		ordinaryTail = tailTokens
+		ordinaryMarkersClear = tailMarkersClear
+	}
+	if structural && mostlyOrdinaryWords(ordinaryTail) && ordinaryMarkersClear {
 		add(&englishEvidence, EnglishEvidence, "mostly_ordinary_words", 2, "tail is predominantly ordinary alphabetic words")
 	}
-	if structural && stopwordCount(words) >= 2 {
+	densityWords := words
+	if tail && grammar != nil {
+		densityWords = ordinaryWords(tailTokens)
+	}
+	if structural && stopwordCount(densityWords) >= 2 {
 		add(&englishEvidence, EnglishEvidence, "stopword_or_pronoun_density", 1, "contains multiple English function words")
 	}
 
-	result := Result{Version: 1, FirstTokenKind: in.FirstTokenKind, Evidence: append(commandEvidence, englishEvidence...)}
+	result := Result{Version: resultVersion, FirstTokenKind: in.FirstTokenKind, CommandGrammar: grammar, Evidence: append(commandEvidence, englishEvidence...)}
 	for _, evidence := range commandEvidence {
 		result.CommandScore += evidence.Weight
 	}
@@ -201,6 +249,10 @@ func (Classifier) Classify(in Input) Result {
 		result.EnglishScore += evidence.Weight
 	}
 	result.Outcome, result.DecisionCode = decide(result.CommandScore, result.EnglishScore)
+	if grammar != nil && grammar.Uncertain() && resolved(in.FirstTokenKind) && result.Outcome != Ambiguous {
+		result.Outcome = Ambiguous
+		result.DecisionCode = "command_grammar_uncertain"
+	}
 	result.Evidence = append(result.Evidence, Evidence{Domain: DecisionEvidence, Code: result.DecisionCode})
 	if resolved(in.FirstTokenKind) && result.EnglishScore >= 3 {
 		result.Evidence = append(result.Evidence, Evidence{Domain: DecisionEvidence, Code: "known_command_with_natural_language_tail"})
@@ -226,7 +278,7 @@ func decide(commandScore, englishScore int) (Classification, string) {
 
 func hard(kind shell.FirstTokenKind, outcome Classification, code string) Result {
 	_, decisionCode := decide(0, 0)
-	return Result{Version: 1, FirstTokenKind: kind, Outcome: outcome, DecisionCode: decisionCode, Evidence: []Evidence{{Domain: DecisionEvidence, Code: decisionCode}, {Domain: DecisionEvidence, Code: code}}}
+	return Result{Version: resultVersion, FirstTokenKind: kind, Outcome: outcome, DecisionCode: decisionCode, Evidence: []Evidence{{Domain: DecisionEvidence, Code: decisionCode}, {Domain: DecisionEvidence, Code: code}}}
 }
 
 func resolved(kind shell.FirstTokenKind) bool {
@@ -236,6 +288,88 @@ func resolved(kind shell.FirstTokenKind) bool {
 	default:
 		return false
 	}
+}
+
+func (c Classifier) analyzeInvocation(ctx context.Context, in Input, scan scanResult) *commandgrammar.Analysis {
+	if in.FirstTokenKind != shell.TokenCommand || scan.shellOperator || scan.assignmentPrefix || len(scan.tokens) == 0 {
+		return nil
+	}
+	analyzer := c.Invocations
+	if analyzer == nil {
+		return nil
+	}
+	words := make([]commandgrammar.Word, len(scan.tokens))
+	for index, scanned := range scan.tokens {
+		words[index] = commandgrammar.Word{
+			Text:   strings.Trim(scanned.text, "'\""),
+			Static: staticGrammarWord(scanned),
+			Quoted: scanned.quoted,
+		}
+	}
+	analysis := analyzer.Analyze(ctx, commandgrammar.Invocation{Words: words, ExecutablePath: in.ResolvedCommandPath})
+	if !analysis.Modeled() {
+		return nil
+	}
+	return &analysis
+}
+
+func staticGrammarWord(value token) bool {
+	if value.quoted || value.text == "" {
+		return false
+	}
+	return !strings.ContainsAny(value.text, "\\$`'\"")
+}
+
+func grammarEvidence(analysis commandgrammar.Analysis) (string, string) {
+	detail := "matched grammar from installed command help"
+	switch analysis.StopReason {
+	case commandgrammar.StopUndocumentedSubcommand:
+		return "command_grammar_undocumented_subcommand", detail + " until an undocumented subcommand"
+	case commandgrammar.StopUnknownOption:
+		return "command_grammar_unknown_option", detail + " until an unknown option"
+	case commandgrammar.StopMissingOptionValue:
+		return "command_grammar_missing_option_value", detail + " until an option missing its value"
+	case commandgrammar.StopDynamicShellWord:
+		return "command_grammar_dynamic_word", detail + " until a dynamic shell word"
+	case commandgrammar.StopHelpUnavailable:
+		return "command_grammar_help_unavailable", detail + "; deeper help was unavailable"
+	case commandgrammar.StopHelpUnparseable:
+		return "command_grammar_help_unparseable", detail + "; deeper help was not structurally parseable"
+	case commandgrammar.StopDepthLimit:
+		return "command_grammar_depth_limit", detail + " until the bounded help depth"
+	default:
+		if analysis.Coverage == commandgrammar.CoveragePartial {
+			return "command_grammar_partial", detail + "; the advertised structure was explicitly incomplete"
+		}
+		return "command_grammar_recognized", detail
+	}
+}
+
+func inspectableGrammarTail(tokens []token, analysis commandgrammar.Analysis) []token {
+	out := make([]token, 0, len(tokens))
+	for index, value := range tokens {
+		switch analysis.RoleAt(index) {
+		case commandgrammar.RolePositional, commandgrammar.RoleUnexpected:
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func grammarTailHasNoShellMarkers(scan scanResult, tokens []token) bool {
+	if scan.shellOperator || scan.assignmentPrefix || scan.commandSubstitution || scan.parameterExpansion || scan.glob {
+		return false
+	}
+	for _, value := range tokens {
+		if value.quoted {
+			continue
+		}
+		clean := strings.Trim(value.text, "'\"")
+		if flagRE.MatchString(clean) || strings.Contains(clean, "=") || strings.HasPrefix(clean, "~") || strings.Contains(clean, "/") || fileExtRE.MatchString(filepath.Base(clean)) {
+			return false
+		}
+	}
+	return true
 }
 
 func containsExact(values []string, target string) bool {
@@ -292,12 +426,12 @@ func shellControl(first string) bool {
 	}
 }
 
-func grammarTail(tokens []token) bool {
-	if len(tokens) < 3 {
+func grammarBearing(tokens []token) bool {
+	if len(tokens) < 2 {
 		return false
 	}
 	ordinary, grammar := 0, false
-	for _, token := range tokens[1:] {
+	for _, token := range tokens {
 		if token.quoted {
 			continue
 		}
@@ -341,17 +475,17 @@ func ordinaryWords(tokens []token) []string {
 	return out
 }
 
-func mostlyOrdinary(tokens []token) bool {
-	if len(tokens) < 3 {
+func mostlyOrdinaryWords(tokens []token) bool {
+	if len(tokens) < 2 {
 		return false
 	}
 	ordinary := 0
-	for _, token := range tokens[1:] {
+	for _, token := range tokens {
 		if isAlpha(strings.Trim(token.text, ".,!?():")) {
 			ordinary++
 		}
 	}
-	return ordinary >= 2 && ordinary*4 >= (len(tokens)-1)*3
+	return ordinary >= 2 && ordinary*4 >= len(tokens)*3
 }
 
 func stopwordCount(words []string) int {

@@ -1,13 +1,74 @@
 package classifier
 
 import (
+	"context"
+	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/agenticlab-ai/humansh/internal/commandgrammar"
 	"github.com/agenticlab-ai/humansh/internal/config"
 	"github.com/agenticlab-ai/humansh/internal/shell"
 )
+
+func classifierWithFixtureGrammar() Classifier {
+	return Classifier{Invocations: commandgrammar.NewAnalyzer(classifierHelpSource{})}
+}
+
+type classifierHelpSource struct{}
+
+func (classifierHelpSource) Open(context.Context, commandgrammar.ExecutableRef) (commandgrammar.HelpSession, error) {
+	return classifierHelpSession{}, nil
+}
+
+type classifierHelpSession struct{}
+
+func (classifierHelpSession) Load(_ context.Context, prefix []string) commandgrammar.HelpResult {
+	root := commandgrammar.NodeSpec{
+		OptionsKnown: true,
+		Options: map[string]commandgrammar.OptionSpec{
+			"--help":     {Terminal: true},
+			"--no-pager": {},
+			"-C":         {Value: commandgrammar.RequiredValue, AllowSeparate: true, AllowAttached: true},
+		},
+		SubcommandState:     commandgrammar.SubcommandsListed,
+		Subcommands:         map[string]struct{}{"status": {}, "commit": {}},
+		Complete:            true,
+		SubcommandsComplete: true,
+	}
+	status := commandgrammar.NodeSpec{
+		OptionsKnown: true,
+		Options: map[string]commandgrammar.OptionSpec{
+			"--help": {Terminal: true}, "--short": {},
+		},
+		SubcommandState: commandgrammar.SubcommandsNone,
+		Complete:        true,
+	}
+	commit := commandgrammar.NodeSpec{
+		OptionsKnown: true,
+		Options: map[string]commandgrammar.OptionSpec{
+			"-m": {Value: commandgrammar.RequiredValue, AllowSeparate: true, AllowAttached: true},
+		},
+		SubcommandState: commandgrammar.SubcommandsNone,
+		Complete:        true,
+	}
+	var node commandgrammar.NodeSpec
+	switch strings.Join(prefix, " ") {
+	case "":
+		node = root
+	case "status":
+		node = status
+	case "commit":
+		node = commit
+	default:
+		return commandgrammar.HelpResult{Status: commandgrammar.HelpUnavailable}
+	}
+	return commandgrammar.HelpResult{Node: node, Status: commandgrammar.HelpOK}
+}
+
+func (classifierHelpSession) Close() error { return nil }
 
 func TestPureClassifierP95Target(t *testing.T) {
 	classifier := Classifier{}
@@ -30,44 +91,53 @@ func TestPureClassifierP95Target(t *testing.T) {
 func TestNormativeExamples(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		raw  string
-		kind shell.FirstTokenKind
-		want Classification
+		name    string
+		raw     string
+		kind    shell.FirstTokenKind
+		grammar bool
+		want    Classification
 	}{
-		{"git", "git status", shell.TokenCommand, Literal},
-		{"flags-path", "ls -lah ~/Downloads", shell.TokenCommand, Literal},
-		{"assignment", "FOO=bar", shell.TokenUnresolved, Literal},
-		{"pipeline", "cat file.txt | grep error", shell.TokenCommand, Literal},
-		{"echo-tail", "echo show me the files", shell.TokenBuiltin, Literal},
-		{"echo-quoted", `echo "show me the files"`, shell.TokenBuiltin, Literal},
-		{"which", "which git", shell.TokenCommand, Literal},
-		{"open-file", "open README.md", shell.TokenCommand, Literal},
-		{"find-command", "find . -type f -mtime -1", shell.TokenCommand, Literal},
-		{"instruction", "show me the largest files in this folder", shell.TokenUnresolved, Natural},
-		{"question", "how do I see what is listening on port 3000", shell.TokenUnresolved, Natural},
-		{"list", "list all files changed during the last two days", shell.TokenUnresolved, Natural},
-		{"find-tail", "find all files modified today", shell.TokenCommand, Ambiguous},
-		{"which-tail", "which process is using port 3000", shell.TokenCommand, Ambiguous},
-		{"open-tail", "open the project folder", shell.TokenCommand, Ambiguous},
-		{"sort-tail", "sort these files by size", shell.TokenCommand, Ambiguous},
-		{"kill-tail", "kill whatever is using port 3000", shell.TokenBuiltin, Ambiguous},
-		{"time-tail", "time the build", shell.TokenReserved, Ambiguous},
-		{"watch-tail", "watch the logs", shell.TokenCommand, Ambiguous},
-		{"top-tail", "top processes by memory", shell.TokenCommand, Ambiguous},
-		{"who-tail", "who is using port 80", shell.TokenCommand, Ambiguous},
-		{"make-tail", "make it faster", shell.TokenCommand, Ambiguous},
-		{"head-tail", "head to the downloads folder", shell.TokenCommand, Ambiguous},
-		{"test-tail", "test if the port is open", shell.TokenBuiltin, Ambiguous},
-		{"typo", "gti status", shell.TokenUnresolved, Ambiguous},
-		{"custom", "foo bar baz", shell.TokenUnresolved, Ambiguous},
-		{"redirect", "not-a-command > existing-file", shell.TokenUnresolved, Literal},
-		{"negative-dependency", "docker ps that were running", shell.TokenCommand, Literal},
+		{"structured", "fixturevcs status", shell.TokenCommand, true, Literal},
+		{"English-subcommand", "fixturevcs is failing please authenticate", shell.TokenCommand, true, Ambiguous},
+		{"English-operands", "fixturevcs status is failing please authenticate", shell.TokenCommand, true, Ambiguous},
+		{"quoted-option-value", `fixturevcs commit -m "please authenticate"`, shell.TokenCommand, true, Literal},
+		{"subcommand-typo", "fixturevcs statsu", shell.TokenCommand, true, Ambiguous},
+		{"flags-path", "ls -lah ~/Downloads", shell.TokenCommand, false, Literal},
+		{"assignment", "FOO=bar", shell.TokenUnresolved, false, Literal},
+		{"pipeline", "cat file.txt | grep error", shell.TokenCommand, false, Literal},
+		{"bare-builtin-English-tail", "echo show me the files", shell.TokenBuiltin, false, Ambiguous},
+		{"echo-quoted", `echo "show me the files"`, shell.TokenBuiltin, false, Literal},
+		{"which", "which git", shell.TokenCommand, false, Literal},
+		{"open-file", "open README.md", shell.TokenCommand, false, Literal},
+		{"find-command", "find . -type f -mtime -1", shell.TokenCommand, false, Literal},
+		{"instruction", "show me the largest files in this folder", shell.TokenUnresolved, false, Natural},
+		{"question", "how do I see what is listening on port 3000", shell.TokenUnresolved, false, Natural},
+		{"list", "list all files changed during the last two days", shell.TokenUnresolved, false, Natural},
+		{"find-tail", "find all files modified today", shell.TokenCommand, false, Ambiguous},
+		{"which-tail", "which process is using port 3000", shell.TokenCommand, false, Ambiguous},
+		{"open-tail", "open the project folder", shell.TokenCommand, false, Ambiguous},
+		{"sort-tail", "sort these files by size", shell.TokenCommand, false, Ambiguous},
+		{"kill-tail", "kill whatever is using port 3000", shell.TokenBuiltin, false, Ambiguous},
+		{"time-tail", "time the build", shell.TokenReserved, false, Ambiguous},
+		{"watch-tail", "watch the logs", shell.TokenCommand, false, Ambiguous},
+		{"top-tail", "top processes by memory", shell.TokenCommand, false, Ambiguous},
+		{"who-tail", "who is using port 80", shell.TokenCommand, false, Ambiguous},
+		{"make-tail", "make it faster", shell.TokenCommand, false, Ambiguous},
+		{"head-tail", "head to the downloads folder", shell.TokenCommand, false, Ambiguous},
+		{"test-tail", "test if the port is open", shell.TokenBuiltin, false, Ambiguous},
+		{"typo", "gti status", shell.TokenUnresolved, false, Ambiguous},
+		{"custom", "foo bar baz", shell.TokenUnresolved, false, Ambiguous},
+		{"redirect", "not-a-command > existing-file", shell.TokenUnresolved, false, Literal},
+		{"no-command-exception", "docker ps that were running", shell.TokenCommand, false, Ambiguous},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			got := (Classifier{}).Classify(Input{Raw: test.raw, Shell: "zsh", FirstTokenKind: test.kind, Overrides: config.DefaultOverrides()})
+			classifier := Classifier{}
+			if test.grammar {
+				classifier = classifierWithFixtureGrammar()
+			}
+			got := classifier.Classify(Input{Raw: test.raw, Shell: "zsh", FirstTokenKind: test.kind, Overrides: config.DefaultOverrides()})
 			if got.Outcome != test.want {
 				t.Fatalf("Classify(%q) = %s (command=%d english=%d evidence=%+v), want %s", test.raw, got.Outcome, got.CommandScore, got.EnglishScore, got.Evidence, test.want)
 			}
@@ -85,14 +155,99 @@ func TestGrammarLexiconLoadBearingRows(t *testing.T) {
 	}
 }
 
-func TestNegativeListBlocksDependentRules(t *testing.T) {
+func TestCommandGrammarIsSharedAcrossShellInputs(t *testing.T) {
+	t.Parallel()
+	classifier := classifierWithFixtureGrammar()
+	for _, shellID := range []string{"zsh", "bash"} {
+		t.Run(shellID, func(t *testing.T) {
+			t.Parallel()
+			result := classifier.Classify(Input{Raw: "fixturevcs is failing please authenticate", Shell: shellID, FirstTokenKind: shell.TokenCommand})
+			if result.Version != resultVersion || result.Outcome != Ambiguous || result.CommandGrammar == nil {
+				t.Fatalf("classification = %+v", result)
+			}
+			if result.CommandGrammar.Source != "installed_help" || result.CommandGrammar.Boundary != 1 || result.CommandGrammar.StopReason != commandgrammar.StopUndocumentedSubcommand {
+				t.Fatalf("grammar summary = %+v", result.CommandGrammar)
+			}
+			for _, code := range []string{"resolved_first_token", "command_grammar_undocumented_subcommand", "natural_language_tail"} {
+				if !hasEvidence(result, code) {
+					t.Errorf("missing evidence %q: %+v", code, result.Evidence)
+				}
+			}
+		})
+	}
+}
+
+func TestCommandGrammarExcludesKnownOptionValuesFromEnglishTail(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{`fixturevcs commit -m "please authenticate"`} {
+		result := classifierWithFixtureGrammar().Classify(Input{Raw: raw, FirstTokenKind: shell.TokenCommand})
+		if result.Outcome != Literal || result.CommandGrammar == nil || hasEvidence(result, "natural_language_tail") {
+			t.Fatalf("Classify(%q) = %+v", raw, result)
+		}
+	}
+}
+
+func TestCommandGrammarInspectsWordsAfterTerminalOptions(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{
+		"fixturevcs --help is failing please authenticate",
+		"fixturevcs status --help is failing please authenticate",
+	} {
+		result := classifierWithFixtureGrammar().Classify(Input{Raw: raw, FirstTokenKind: shell.TokenCommand})
+		if result.Outcome != Ambiguous || result.CommandGrammar == nil || !hasEvidence(result, "natural_language_tail") {
+			t.Fatalf("Classify(%q) = %+v", raw, result)
+		}
+	}
+}
+
+func TestCommandGrammarJSONSummaryOmitsRawWordsAndAnnotations(t *testing.T) {
+	t.Parallel()
+	result := classifierWithFixtureGrammar().Classify(Input{Raw: "fixturevcs is failing please authenticate", FirstTokenKind: shell.TokenCommand})
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, "failing please authenticate") || strings.Contains(text, `"annotations"`) {
+		t.Fatalf("classification JSON exposed raw grammar words or internal roles: %s", text)
+	}
+}
+
+func TestClassifierHasNoCommandNameNegativeExceptions(t *testing.T) {
 	t.Parallel()
 	result := (Classifier{}).Classify(Input{Raw: "docker ps that were running", FirstTokenKind: shell.TokenCommand})
 	for _, code := range []string{"natural_language_tail", "natural_clause", "mostly_ordinary_words"} {
-		if hasEvidence(result, code) {
-			t.Fatalf("negative-list command received %s: %+v", code, result.Evidence)
+		if !hasEvidence(result, code) {
+			t.Fatalf("command-name exception suppressed %s: %+v", code, result.Evidence)
 		}
 	}
+}
+
+func TestInstalledHelpAnalyzerRunsOnlyForExternalCommands(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []shell.FirstTokenKind{shell.TokenAlias, shell.TokenFunction, shell.TokenBuiltin, shell.TokenReserved, shell.TokenUnresolved} {
+		counter := &countingInvocationAnalyzer{}
+		(Classifier{Invocations: counter}).Classify(Input{Raw: "fixturevcs status", FirstTokenKind: kind, ResolvedCommandPath: "/tmp/fixturevcs"})
+		if counter.calls != 0 {
+			t.Errorf("kind=%s invoked installed help", kind)
+		}
+	}
+	counter := &countingInvocationAnalyzer{}
+	(Classifier{Invocations: counter}).Classify(Input{Raw: "fixturevcs status", FirstTokenKind: shell.TokenCommand, ResolvedCommandPath: "/tmp/fixturevcs"})
+	if counter.calls != 1 || counter.path != "/tmp/fixturevcs" {
+		t.Fatalf("external command metadata calls=%d path=%q", counter.calls, counter.path)
+	}
+}
+
+type countingInvocationAnalyzer struct {
+	calls int
+	path  string
+}
+
+func (analyzer *countingInvocationAnalyzer) Analyze(_ context.Context, inv commandgrammar.Invocation) commandgrammar.Analysis {
+	analyzer.calls++
+	analyzer.path = inv.ExecutablePath
+	return commandgrammar.Analysis{Coverage: commandgrammar.CoverageUnmodeled}
 }
 
 func TestOverrides(t *testing.T) {
@@ -107,12 +262,13 @@ func TestOverrides(t *testing.T) {
 	}
 }
 
-func TestDecisionCodeAlwaysUsesThresholdVocabulary(t *testing.T) {
+func TestDecisionCodeUsesStableVocabulary(t *testing.T) {
 	allowed := map[string]bool{
 		"strong_command_weak_english": true,
 		"strong_english_weak_command": true,
 		"conflicting_strong_evidence": true,
 		"insufficient_evidence":       true,
+		"command_grammar_uncertain":   true,
 	}
 	overrides := config.ClassifierOverrides{Version: 1, AlwaysCommands: []string{"deploy"}, AlwaysNaturalLanguagePrefixes: []string{"explain"}}
 	for _, input := range []Input{

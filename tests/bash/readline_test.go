@@ -118,6 +118,9 @@ zpty -d H`
 			t.Errorf("fake call log missing %q:\n%s", want, callData)
 		}
 	}
+	if strings.Contains(string(callData), "--resolved-command-path") {
+		t.Fatalf("Bash force-translation leaked unused classifier path metadata:\n%s", callData)
+	}
 	if lines := strings.Count(strings.TrimSpace(string(callData)), "\n") + 1; lines != 3 {
 		t.Fatalf("Bash startup or ordinary Enter invoked humansh; calls=%d\n%s", lines, callData)
 	}

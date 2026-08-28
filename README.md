@@ -41,7 +41,7 @@ The generated command lands in your editable command line. Nothing runs until yo
 
 - **Never auto-executes.** Generated commands are inserted for review. High-risk output is gated behind a second, deliberate key sequence.
 - **Runs in your shell, not a wrapper.** Integration happens at the ZLE/Readline layer, so `cd`, `export`, aliases, functions, and job control behave normally. It is not a REPL, terminal emulator, or replacement shell.
-- **Stays quiet when you type real commands.** A local, deterministic classifier decides before any network call, so `git status` costs no latency and no quota.
+- **Stays quiet when you type real commands.** A local classifier decides before any provider call, so `git status` consumes no model quota.
 - **Refuses to guess.** Input that is genuinely ambiguous is left untouched and never sent to a provider.
 - **Uses your existing provider CLI setup.** Codex, Claude Code, and Cursor own their authentication and billing policy, including centrally managed distributions. Metered OpenRouter API billing is opt-in only, with no silent fallback.
 - **Sends very little.** Your request, shell, OS, architecture, a privacy-normalised directory label, and a fixed list of detected tools. Never shell history, environment variables, file contents, or your username.
@@ -111,12 +111,16 @@ humansh classifies **intent**, not syntax — `find all files modified today` pa
 | `natural_language` | Translated, validated, risk-scored, inserted for review. |
 | `ambiguous` | **Left untouched.** No provider call. Use `Ctrl-G` or `Ctrl-X Enter` to decide. |
 
-Scoring is local, deterministic, and inspectable — never an LLM:
+Scoring is local and inspectable — never an LLM:
 
 ```sh
 print -rn -- 'find all files modified today' \
   | humansh classify --shell zsh --first-token-kind command
 ```
+
+For an installed external command, the shell-neutral Go analyzer asks the exact resolved executable for `--help` and walks only subcommands that earlier help output documented. It uses the resulting option and subcommand structure before scoring the remaining operands. This is command-agnostic: production contains no Git-specific or other per-command catalog. For example, the installed Git's own help can keep `git status` literal while leaving `git is failing please authenticate` ambiguous instead of executing it as `git is …`.
+
+Zsh Smart Enter uses this analyzer, and the binary exposes the same implementation through both the `zle-v1` and `readline-v1` `smart` protocol paths. The installed Bash UI deliberately does not call `smart`: ordinary Enter remains native and Ctrl-G continues to force translation. Humansh never executes the typed line or a generated command during classification. It may directly run the resolved executable with fixed, bounded help arguments, however. Help mode is a convention, not a sandbox, so a hostile or unusual executable—or code it launches—could still perform side effects; see [docs/security.md](docs/security.md).
 
 Teach it your project's commands and your own phrasing:
 

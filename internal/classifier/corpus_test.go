@@ -17,12 +17,18 @@ type corpusCase struct {
 	name      string
 	raw       string
 	kind      shell.FirstTokenKind
+	grammar   bool
 	want      Classification
 	decision  string
 	command   scoreBounds
 	english   scoreBounds
 	required  []string
 	forbidden []string
+}
+
+func withGrammar(value corpusCase) corpusCase {
+	value.grammar = true
+	return value
 }
 
 func strongLiteral(name, raw string, kind shell.FirstTokenKind, required ...string) corpusCase {
@@ -48,10 +54,6 @@ var grammarTailV1Corpus = []string{
 	"about", "after", "at", "before", "by", "during", "for", "from", "if", "in", "into", "of", "on", "over", "through", "to", "under", "until", "with", "without",
 }
 
-var negativeTailHeadCorpus = []string{
-	"echo", "print", "printf", "man", "git", "docker", "kubectl", "npm", "pnpm", "yarn", "cargo", "brew", "gh", "humansh", "codex", "claude", "cursor", "cursor-agent", "agent",
-}
-
 var representativeCorpus = []corpusCase{
 	// Hard behavior.
 	{name: "empty", raw: "", kind: shell.TokenEmpty, want: Literal, decision: "insufficient_evidence", command: scoreBounds{0, 0}, english: scoreBounds{0, 0}, required: []string{"empty_input"}},
@@ -62,7 +64,15 @@ var representativeCorpus = []corpusCase{
 	{name: "carriage-return", raw: "git status\rpwd", kind: shell.TokenCommand, want: Literal, decision: "insufficient_evidence", command: scoreBounds{0, 0}, english: scoreBounds{0, 0}, required: []string{"multiline_input"}},
 
 	// Resolved commands, aliases, functions, builtins, and reserved words.
-	strongLiteral("git-status", "git status", shell.TokenCommand, "resolved_first_token"),
+	withGrammar(strongLiteral("structured-status", "fixturevcs status", shell.TokenCommand, "resolved_first_token", "command_grammar_recognized")),
+	withGrammar(strongLiteral("structured-global-and-status-options", "fixturevcs --no-pager status --short", shell.TokenCommand, "resolved_first_token", "command_grammar_recognized")),
+	withGrammar(strongLiteral("structured-message-option", `fixturevcs commit -m "please authenticate"`, shell.TokenCommand, "resolved_first_token", "command_grammar_recognized")),
+	strongLiteral("git-status-fallback", "git status", shell.TokenCommand, "resolved_first_token"),
+	strongLiteral("kubectl-get-pods", "kubectl get pods", shell.TokenCommand, "resolved_first_token"),
+	strongLiteral("npm-run-build", "npm run build", shell.TokenCommand, "resolved_first_token"),
+	strongLiteral("cargo-test", "cargo test", shell.TokenCommand, "resolved_first_token"),
+	strongLiteral("brew-install-jq", "brew install jq", shell.TokenCommand, "resolved_first_token"),
+	strongLiteral("gh-pr-list", "gh pr list", shell.TokenCommand, "resolved_first_token"),
 	strongLiteral("go-test", "go test", shell.TokenCommand, "resolved_first_token"),
 	strongLiteral("make-build", "make build", shell.TokenCommand, "resolved_first_token"),
 	strongLiteral("rg-todo", "rg TODO", shell.TokenCommand, "resolved_first_token"),
@@ -142,6 +152,13 @@ var representativeCorpus = []corpusCase{
 	strongAmbiguous("make-tail", "make it faster", shell.TokenCommand, "natural_language_tail"),
 	strongAmbiguous("head-tail", "head to the downloads folder", shell.TokenCommand, "natural_language_tail"),
 	strongAmbiguous("test-tail", "test if the port is open", shell.TokenBuiltin, "natural_language_tail"),
+	strongAmbiguous("docker-English-tail", "docker ps that were running", shell.TokenCommand, "natural_language_tail"),
+	withGrammar(strongAmbiguous("structured-unknown-English-subcommand", "fixturevcs is failing please authenticate", shell.TokenCommand, "command_grammar_undocumented_subcommand", "natural_language_tail")),
+	withGrammar(strongAmbiguous("structured-status-English-operands", "fixturevcs status is failing please authenticate", shell.TokenCommand, "command_grammar_recognized", "natural_language_tail")),
+	withGrammar(strongAmbiguous("structured-status-English-after-option", "fixturevcs status --short is failing please authenticate", shell.TokenCommand, "command_grammar_recognized", "natural_language_tail")),
+	{name: "structured-unknown-short-subcommand", raw: "fixturevcs statsu", kind: shell.TokenCommand, grammar: true, want: Ambiguous, decision: "command_grammar_uncertain", command: scoreBounds{5, 5}, english: scoreBounds{0, 0}, required: []string{"resolved_first_token", "command_grammar_undocumented_subcommand"}},
+	{name: "structured-unknown-status-option", raw: "fixturevcs status --porcelian", kind: shell.TokenCommand, grammar: true, want: Ambiguous, decision: "command_grammar_uncertain", command: scoreBounds{8, 8}, english: scoreBounds{0, 0}, required: []string{"resolved_first_token", "command_grammar_unknown_option"}},
+	{name: "structured-missing-global-option-value", raw: "fixturevcs -C", kind: shell.TokenCommand, grammar: true, want: Ambiguous, decision: "command_grammar_uncertain", command: scoreBounds{8, 8}, english: scoreBounds{0, 0}, required: []string{"resolved_first_token", "command_grammar_missing_option_value"}},
 
 	// Short unresolved command-like inputs stay uncertain.
 	weakAmbiguous("typo-gti", "gti status"),
@@ -182,13 +199,6 @@ func TestClassifierCorpus(t *testing.T) {
 			required: []string{"resolved_first_token", "natural_language_tail", "mostly_ordinary_words"},
 		})
 	}
-	for _, head := range negativeTailHeadCorpus {
-		cases = append(cases, corpusCase{
-			name: "negative-tail-head-" + head, raw: head + " topic reference", kind: shell.TokenCommand,
-			want: Literal, decision: "strong_command_weak_english", command: scoreBounds{5, 5}, english: scoreBounds{0, 0},
-			required: []string{"resolved_first_token"}, forbidden: []string{"natural_language_tail", "natural_clause", "mostly_ordinary_words"},
-		})
-	}
 	if len(cases) < 150 {
 		t.Fatalf("classifier corpus has %d rows; want at least 150", len(cases))
 	}
@@ -196,7 +206,11 @@ func TestClassifierCorpus(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			got := (Classifier{}).Classify(Input{Raw: test.raw, Shell: "zsh", FirstTokenKind: test.kind, Overrides: config.DefaultOverrides()})
+			classifier := Classifier{}
+			if test.grammar {
+				classifier = classifierWithFixtureGrammar()
+			}
+			got := classifier.Classify(Input{Raw: test.raw, Shell: "zsh", FirstTokenKind: test.kind, Overrides: config.DefaultOverrides()})
 			if got.Outcome != test.want || got.DecisionCode != test.decision {
 				t.Fatalf("Classify(%q) = %s/%s scores=%d/%d evidence=%+v; want %s/%s", test.raw, got.Outcome, got.DecisionCode, got.CommandScore, got.EnglishScore, got.Evidence, test.want, test.decision)
 			}
@@ -228,18 +242,6 @@ func TestGrammarTailV1FixtureExactlyMatchesLexicon(t *testing.T) {
 		result := (Classifier{}).Classify(Input{Raw: "probe x" + word + " token", FirstTokenKind: shell.TokenCommand})
 		if hasEvidence(result, "natural_language_tail") {
 			t.Errorf("grammar lexicon matched %q as a substring", word)
-		}
-	}
-}
-
-func TestNegativeTailHeadFixtureExactlyMatchesImplementation(t *testing.T) {
-	t.Parallel()
-	if len(negativeTailHeads) != len(negativeTailHeadCorpus) {
-		t.Fatalf("implementation has %d negative heads; fixture has %d", len(negativeTailHeads), len(negativeTailHeadCorpus))
-	}
-	for _, head := range negativeTailHeadCorpus {
-		if !setHas(negativeTailHeads, head) {
-			t.Errorf("negative-list fixture head %q missing from implementation", head)
 		}
 	}
 }

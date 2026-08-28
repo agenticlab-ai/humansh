@@ -5,6 +5,7 @@ The product has four mandatory modules and one composition root:
 ```text
 cmd/humansh → cli → bootstrap
                      ├─ app (provider/shell-neutral workflow)
+                     ├─ classifier → commandgrammar help analyzer
                      ├─ contextinfo → injected host metadata
                      ├─ llm contract → codex | claude | cursor | openrouter
                      ├─ shell contract → zsh | bash
@@ -31,7 +32,11 @@ The clear-line callback defaults to Escape and empties only the live unsubmitted
 
 Both integrations capture protocol stdout and stderr separately through a mode-0600 temporary channel. Only a non-empty single-line stdout value paired with a generated exit can replace the editable buffer; displayed stderr is sanitized and bounded.
 
-The active shell lexes the first token without expansion and passes only its fixed kind through argv. The full buffer remains on stdin. The Go classifier computes independent command and English scores and is the only authority for literal/natural/ambiguous intent.
+The active shell lexes the first token without expansion and reports its fixed kind. For an external command it also resolves the exact executable path without running it; the full buffer remains on stdin. The Go classifier computes independent command and English scores and is the only authority for literal/natural/ambiguous intent.
+
+The classifier owns an injected `commandgrammar.Analyzer`, shared by `zle-v1` and `readline-v1` smart/classify protocol calls. Zsh Smart Enter supplies its shell-resolved external path; Bash's installed explicit-translation callback does not classify or send an unused path. For a resolved external executable, the production analyzer invokes that exact path directly with a fixed `--help` argument. It may then repeat the probe with only subcommand words already documented by earlier help output. The analyzer parses common usage, command, and option forms, annotates the input words, and returns only a raw-free structural summary to the classifier. It contains no command-specific schemas or command-name branches. Help failures and formats it cannot parse fall back conservatively.
+
+Runtime help inspection never passes the unrecognized input tail to the executable, never uses a shell, and never directly runs `man`, completion code, positional `help`, or speculative `-h` forms. Each probe and the overall traversal have fixed timeout, output, and depth/count bounds; they run with EOF stdin, a minimal environment, and isolated temporary home and working directories. This limits exposure but is not a sandbox: an executable can ignore `--help`, launch other programs, access the network, daemonize, or perform side effects. Neither the typed line nor a generated command is executed by this path.
 
 To add a provider: implement `llm.Provider`; keep auth, transport, and typed error mapping in its child package; run the shared provider contract; then register it in `bootstrap` and add its typed config. To add a shell: implement `shell.Adapter`; declare capabilities; add a no-execution validator and integration asset where needed; run the shared shell contract; then register it in `bootstrap` and add typed shell config. Neither extension changes the app workflow.
 
