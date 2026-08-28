@@ -314,7 +314,7 @@ zpty -d H`
 	}
 }
 
-func TestProductionBinaryPreservesUndocumentedEnglishTail(t *testing.T) {
+func TestProductionBinaryPreservesEnglishTailAndAcceptsBSDCompactFlags(t *testing.T) {
 	asset := assetPath(t)
 	repo := filepath.Clean(filepath.Join(filepath.Dir(asset), "..", "..", ".."))
 	temp := t.TempDir()
@@ -328,7 +328,7 @@ func TestProductionBinaryPreservesUndocumentedEnglishTail(t *testing.T) {
 	if output, err := buildProduction.CombinedOutput(); err != nil {
 		t.Fatalf("build production humansh: %v\n%s", err, output)
 	}
-	fixture := filepath.Join(binDir, "fixturecmd")
+	fixture := filepath.Join(binDir, "fixturebsdusage")
 	buildFixture := exec.Command("go", "build", "-o", fixture, "./internal/commandgrammar/testdata/helpfixture")
 	buildFixture.Dir = repo
 	if output, err := buildFixture.CombinedOutput(); err != nil {
@@ -354,10 +354,16 @@ wait_for() {
 init='PS1="P> "; _production_accept() { local captured=$BUFFER; zle -I; print -r -- "PRODUCTION_ACCEPTED:$captured"; BUFFER=":"; zle accept-line; }; _production_dump() { zle -I; print -r -- "PRODUCTION_DUMP:<$BUFFER>"; zle reset-prompt; }; zle -N _production_accept; zle -N _production_dump; for keymap in main emacs viins vicmd; do bindkey -M "$keymap" "^M" _production_accept; bindkey -M "$keymap" "^J" _production_accept; bindkey -M "$keymap" "^]" _production_dump; done; source "$HUMANSH_ASSET"; print -r -- PRODUCTION_READY'
 zpty -w H "$init"
 wait_for 'PRODUCTION_READY' || exit 91
-zpty -w -n H $'fixturecmd is not working\r'
+zpty -w -n H $'fixturebsdusage is not working\r'
 wait_for 'Not sure whether this is English' || exit 92
 zpty -w -n H $'\x1d'
-wait_for 'PRODUCTION_DUMP:<fixturecmd is not working>' || exit 93
+wait_for 'PRODUCTION_DUMP:<fixturebsdusage is not working>' || exit 93
+zpty -w -n H $'\x1b'
+sleep 0.1
+zpty -w -n H $'\x1d'
+wait_for 'PRODUCTION_DUMP:<>' || exit 94
+zpty -w -n H $'fixturebsdusage -rf internal/commandgrammar/\r'
+wait_for 'PRODUCTION_ACCEPTED:fixturebsdusage -rf internal/commandgrammar/' || exit 95
 print -r -- PRODUCTION_DONE
 zpty -d H`
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -375,10 +381,13 @@ zpty -d H`
 		t.Fatalf("production ZLE installed-help protocol: %v\n%s", err, output)
 	}
 	text := string(output)
-	if !strings.Contains(text, "PRODUCTION_DONE") || strings.Contains(text, "PRODUCTION_ACCEPTED:fixturecmd is not working") {
+	if !strings.Contains(text, "PRODUCTION_DONE") || strings.Contains(text, "PRODUCTION_ACCEPTED:fixturebsdusage is not working") {
 		t.Fatalf("undocumented English tail was accepted instead of preserved:\n%s", text)
 	}
-	if strings.Contains(text, "Usage: fixturevcs") || strings.Contains(text, "unexpected fixture invocation") {
+	if !strings.Contains(text, "PRODUCTION_ACCEPTED:fixturebsdusage -rf internal/commandgrammar/") {
+		t.Fatalf("valid BSD compact flags were not accepted:\n%s", text)
+	}
+	if strings.Contains(text, "usage: fixturebsdusage") || strings.Contains(text, "illegal option") {
 		t.Fatalf("captured help output leaked into the terminal:\n%s", text)
 	}
 	logData, err := os.ReadFile(fixture + ".log")
@@ -386,8 +395,8 @@ zpty -d H`
 		t.Fatal(err)
 	}
 	logText := string(logData)
-	if !strings.Contains(logText, "args=--help") || strings.Contains(logText, "args=is not working") {
-		t.Fatalf("production shell passed the undocumented tail to the executable:\n%s", logText)
+	if strings.Count(logText, "args=--help") != 2 || strings.Contains(logText, "args=is not working") || strings.Contains(logText, "args=-rf") {
+		t.Fatalf("production shell passed typed arguments to the help fixture:\n%s", logText)
 	}
 }
 
