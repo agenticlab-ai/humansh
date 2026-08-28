@@ -201,10 +201,11 @@ Installed-flow scenarios live in [`tests/e2e/install_test.go`](tests/e2e/install
 
 To add a scenario:
 
-1. Add the natural-language request and expected editable command to `tests/e2e/install_test.go`, then send the shell keys a user would press. Zsh Smart Enter uses Enter; Bash translation uses the configured force-translation binding.
-2. Extend [`tests/e2e/testdata/fakecodex/main.go`](tests/e2e/testdata/fakecodex/main.go) to recognise that request and return its deterministic structured response. E2E tests must not need provider credentials, network access, or model output.
-3. Assert both the user-facing translation message and the exact command left in the editable shell buffer. Do not press the final execution key unless command execution is the behaviour under test.
-4. Run the installed-flow suite locally:
+1. Add a subtest to `TestInstalledZshEndToEnd` and drive `runZshScenario` with the keys a user would press. Use `dump_buffer` to inspect a stable editable buffer and `eventually_dump` after cancellation, when the first observation key may be consumed while ZLE returns control.
+2. Extend [`tests/e2e/testdata/fakecodex/main.go`](tests/e2e/testdata/fakecodex/main.go) to recognise the request and return a deterministic structured response. E2E tests must not need provider credentials, network access, or model output. A deliberately slow response must first record its `started` event and still use a finite delay so a failed test cannot leave it running indefinitely.
+3. Assert the user-visible message, the exact editable command, and provider events with `requireProviderEvents`. For a literal command, an unsubmitted request, or an ambiguous request before Ctrl-G, explicitly assert an empty event log; this proves that no LLM call occurred. The fake provider also rejects prompts or environments containing the suite's privacy canaries.
+4. Do not send the final execution key unless execution is the behaviour under test. If a case creates or removes a fixture, check the path before and after the relevant confirmation key.
+5. Run the installed-flow suite locally:
 
    ```sh
    make test-e2e
