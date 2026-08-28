@@ -195,6 +195,23 @@ make verify   # format, lint, architecture, classifier, unit, race, and PTY test
 
 Please run it before opening a PR — CI runs the same gate on Ubuntu and macOS. Behaviour changes to the classifier need corpus fixtures; changes to provider isolation need the matching contract tests. See [docs/architecture.md](docs/architecture.md) for module boundaries, which the build enforces.
 
+### Adding an installed-flow E2E test
+
+Installed-flow scenarios live in [`tests/e2e/install_test.go`](tests/e2e/install_test.go). The suite creates an isolated home directory, runs `scripts/install.sh --local`, completes setup, and drives the installed shell integration through a real pseudo-terminal. Keep that path intact: an E2E case should exercise the installed binary and generated startup file rather than `go run`, a repository asset, or a developer's existing Humansh configuration.
+
+To add a scenario:
+
+1. Add the natural-language request and expected editable command to `tests/e2e/install_test.go`, then send the shell keys a user would press. Zsh Smart Enter uses Enter; Bash translation uses the configured force-translation binding.
+2. Extend [`tests/e2e/testdata/fakecodex/main.go`](tests/e2e/testdata/fakecodex/main.go) to recognise that request and return its deterministic structured response. E2E tests must not need provider credentials, network access, or model output.
+3. Assert both the user-facing translation message and the exact command left in the editable shell buffer. Do not press the final execution key unless command execution is the behaviour under test.
+4. Run the installed-flow suite locally:
+
+   ```sh
+   make test-e2e
+   ```
+
+The target disables Go's test cache and opts into the otherwise-skipped installed-flow package. CI runs it after the normal test gate on fresh Ubuntu and macOS GitHub-hosted runners.
+
 ## Security
 
 Report vulnerabilities through this repository's private security-advisory mechanism, not a public issue. See [SECURITY.md](SECURITY.md) and [docs/security.md](docs/security.md) for the threat model and the guarantees humansh does and does not make.
