@@ -125,6 +125,41 @@ func TestRuntimeHelpSourceAcceptsStderrAndNonzeroHelpExit(t *testing.T) {
 	}
 }
 
+func TestRuntimeHelpSourceParsesBSDCompactFlagsWithoutForwardingTypedArguments(t *testing.T) {
+	original := buildHelpFixture(t, "fixturevcs")
+	path := copyExecutable(t, original, "fixturebsdusage")
+	inv := invocation("fixturebsdusage -rf internal/commandgrammar/")
+	inv.ExecutablePath = path
+	analysis := testRuntimeAnalyzer(RuntimeHelpSource{Timeout: 5 * time.Second}).Analyze(context.Background(), inv)
+	if analysis.Coverage != CoverageRecognized || analysis.StopReason != StopComplete || analysis.Boundary != 3 || analysis.RoleAt(1) != RoleOption || analysis.RoleAt(2) != RolePositional {
+		t.Fatalf("BSD compact-option analysis=%+v annotations=%+v", analysis, analysis.Annotations)
+	}
+	logData, err := os.ReadFile(path + ".log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logText := string(logData)
+	if !strings.Contains(logText, "args=--help") || strings.Contains(logText, "-rf") || strings.Contains(logText, "internal/commandgrammar") {
+		t.Fatalf("typed BSD invocation reached help process: %s", logText)
+	}
+}
+
+func TestRuntimeHelpSourceParsesInstalledBSDRMCompactFlags(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Darwin /bin/rm help syntax regression")
+	}
+	const path = "/bin/rm"
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("%s is unavailable: %v", path, err)
+	}
+	inv := invocation("rm -rf internal/commandgrammar/")
+	inv.ExecutablePath = path
+	analysis := testRuntimeAnalyzer(RuntimeHelpSource{Timeout: 5 * time.Second}).Analyze(context.Background(), inv)
+	if analysis.Coverage != CoverageRecognized || analysis.StopReason != StopComplete || analysis.Boundary != 3 || analysis.RoleAt(1) != RoleOption || analysis.RoleAt(2) != RolePositional {
+		t.Fatalf("installed BSD rm compact-option analysis=%+v annotations=%+v", analysis, analysis.Annotations)
+	}
+}
+
 func TestRuntimeHelpSourceTimesOutAndFallsBack(t *testing.T) {
 	original := buildHelpFixture(t, "fixturevcs")
 	path := copyExecutable(t, original, "fixturehang")

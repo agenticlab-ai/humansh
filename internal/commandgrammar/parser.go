@@ -50,6 +50,9 @@ func ParseHelp(data []byte, complete bool) (NodeSpec, error) {
 	}
 	var commandSection, optionSection, synopsisSection, usageContinuation bool
 	var sawStructure, sawUsage, sawCommandMarker bool
+	var usageLines []string
+	declaredOptions := make(map[string]OptionSpec)
+	shortOptionDiagnostic := rejectsLongHelpOption(text)
 	type commandCandidate struct {
 		indent int
 		names  []string
@@ -117,6 +120,7 @@ func ParseHelp(data []byte, complete bool) (NodeSpec, error) {
 		}
 		if usageLine || continuedUsage || synopsisSection {
 			sawStructure, sawUsage, node.OptionsKnown = true, true, true
+			usageLines = append(usageLines, line)
 			parseUsageOptions(line, node.Options)
 			if containsCommandMarker(line) || hasPositionalBraceChoice(line) {
 				sawCommandMarker = true
@@ -125,7 +129,12 @@ func ParseHelp(data []byte, complete bool) (NodeSpec, error) {
 
 		if (optionSection || sawUsage) && indentedOptionLine(line) {
 			definition := optionDefinition(line)
-			mergeOptions(node.Options, parseOptionGroup(definition))
+			parsed := parseOptionGroup(definition)
+			mergeOptions(node.Options, parsed)
+			// An indented option spelling outside a bracketed usage atom is an
+			// exact declaration even when a terse help page omits both an Options
+			// header and descriptive prose.
+			mergeOptions(declaredOptions, parsed)
 		}
 		if commandSection {
 			names := append(commandRow(line), isolatedBraceNames(line)...)
@@ -135,6 +144,7 @@ func ParseHelp(data []byte, complete bool) (NodeSpec, error) {
 		}
 	}
 	flushCommandCandidates()
+	mergeOptions(node.Options, inferCompactUsageOptions(usageLines, node.Options, declaredOptions, shortOptionDiagnostic))
 
 	if len(node.Subcommands) > 0 {
 		node.SubcommandState = SubcommandsListed
@@ -387,14 +397,160 @@ func isolatedBraceNames(line string) []string {
 func parseUsageOptions(line string, destination map[string]OptionSpec) {
 	groups := bracketGroups(line)
 	if len(groups) == 0 {
-		mergeOptions(destination, parseOptionGroup(line))
+		mergeOptions(destination, parseOptionGroupWithPipeAliases(line, false))
 		return
 	}
 	for _, group := range groups {
 		if strings.Contains(group, "-") {
-			mergeOptions(destination, parseOptionGroup(group))
+			mergeOptions(destination, parseOptionGroupWithPipeAliases(group, false))
 		}
 	}
+}
+
+type usageOptionAtom struct {
+	body     string
+	terminal bool
+}
+
+// inferCompactUsageOptions is deliberately a second pass. BSD usage output
+// often wraps corroborating singleton options onto another synopsis line, and
+// an exact single-dash option documented in an option row must win over a
+// cluster-shaped spelling in Usage. The exact multi-character spelling remains
+// in the option map; this pass only adds supported one-byte members.
+func inferCompactUsageOptions(lines []string, parsed, declared map[string]OptionSpec, rejectedLongHelp bool) map[string]OptionSpec {
+	options := make(map[string]OptionSpec)
+	knownShort := make(map[byte]struct{})
+	for name := range parsed {
+		if len(name) == 2 && name[0] == '-' && name[1] != '-' {
+			knownShort[name[1]] = struct{}{}
+		}
+	}
+	shortOptionDialect := rejectedLongHelp || len(knownShort) >= 2
+	for _, line := range lines {
+		for _, group := range bracketGroups(line) {
+			atoms := usageOptionAtoms(group)
+			isolatedAlternative := strings.Contains(group, "|") && hasSingletonUsageAtom(atoms)
+			for _, atom := range atoms {
+				name := "-" + atom.body
+				if len(atom.body) < 2 || !atom.terminal {
+					continue
+				}
+				if _, protected := declared[name]; protected {
+					continue
+				}
+				sharesKnown := false
+				for index := 0; index < len(atom.body); index++ {
+					if _, exists := knownShort[atom.body[index]]; exists {
+						sharesKnown = true
+						break
+					}
+				}
+				if !compactOptionBody(atom.body, shortOptionDialect, rejectedLongHelp, isolatedAlternative, sharesKnown) {
+					continue
+				}
+				options[name] = OptionSpec{}
+				for index := 0; index < len(atom.body); index++ {
+					options["-"+string(atom.body[index])] = OptionSpec{}
+				}
+			}
+		}
+	}
+	return options
+}
+
+func usageOptionAtoms(group string) []usageOptionAtom {
+	var atoms []usageOptionAtom
+	for index := 0; index+1 < len(group); {
+		if group[index] != '-' || group[index+1] == '-' || !usageAtomBoundary(group, index-1) {
+			index++
+			continue
+		}
+		end := index + 1
+		for end < len(group) && compactOptionCharacter(group[end]) {
+			end++
+		}
+		if end == index+1 {
+			index++
+			continue
+		}
+		after := end
+		for after < len(group) && (group[after] == ' ' || group[after] == '\t') {
+			after++
+		}
+		terminal := after == len(group) || group[after] == ']' || group[after] == '|'
+		atoms = append(atoms, usageOptionAtom{body: group[index+1 : end], terminal: terminal})
+		index = end
+	}
+	return atoms
+}
+
+func hasSingletonUsageAtom(atoms []usageOptionAtom) bool {
+	for _, atom := range atoms {
+		if len(atom.body) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func usageAtomBoundary(value string, index int) bool {
+	if index < 0 || index >= len(value) {
+		return true
+	}
+	switch value[index] {
+	case '[', ']', '|', ' ', '\t':
+		return true
+	default:
+		return false
+	}
+}
+
+func compactOptionCharacter(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9' || strings.ContainsRune("@%?,", rune(value))
+}
+
+func compactOptionBody(body string, shortOptionDialect, rejectedLongHelp, isolatedAlternative, sharesKnown bool) bool {
+	if len(body) < 2 || beginsMetavar(body[1:]) {
+		return false
+	}
+	seen := make(map[byte]struct{}, len(body))
+	lower, upper, digits, symbols := 0, 0, 0, 0
+	for index := 0; index < len(body); index++ {
+		value := body[index]
+		if _, duplicate := seen[value]; duplicate {
+			return false
+		}
+		seen[value] = struct{}{}
+		switch {
+		case value >= 'a' && value <= 'z':
+			lower++
+		case value >= 'A' && value <= 'Z':
+			upper++
+		case value >= '0' && value <= '9':
+			digits++
+		default:
+			symbols++
+		}
+	}
+	if len(body) <= 4 {
+		return digits == 0 && symbols == 0 && (rejectedLongHelp || isolatedAlternative || sharesKnown)
+	}
+	if symbols > 0 {
+		return lower+upper >= 2 && (shortOptionDialect || len(body) >= 8)
+	}
+	if digits > 0 {
+		// A rejected --help probe is strong evidence for a traditional
+		// single-byte option dialect. Long mixed sets can include digit flags
+		// (for example, -4 and -6), while short -O2/-j4 spellings remain
+		// attached-value candidates and are excluded above.
+		return rejectedLongHelp && len(body) >= 5 && lower > 0 && upper > 0
+	}
+	return len(body) >= 5 && lower > 0 && upper > 0 && shortOptionDialect
+}
+
+func rejectsLongHelpOption(value string) bool {
+	lower := strings.ToLower(value)
+	return strings.Contains(lower, "illegal option -- -") || strings.Contains(lower, "unrecognized option") && strings.Contains(lower, "--help")
 }
 
 func bracketGroups(value string) []string {
@@ -442,13 +598,20 @@ func optionDefinition(line string) string {
 }
 
 func parseOptionGroup(definition string) map[string]OptionSpec {
+	return parseOptionGroupWithPipeAliases(definition, true)
+}
+
+func parseOptionGroupWithPipeAliases(definition string, sharePipeValues bool) map[string]OptionSpec {
 	out := make(map[string]OptionSpec)
 	definition = negatedOptRE.ReplaceAllString(definition, "--$1, --no-$1")
 	matches := optionMatches(definition)
 	if len(matches) == 0 {
 		return out
 	}
-	groupMode := strings.Contains(definition, ",") || strings.Contains(definition, "|")
+	// Commas join aliases. Pipes do so in option-definition rows, but inside a
+	// usage group they separate alternatives: `-a | -o FILE` must not make -a
+	// consume a value merely because -o does.
+	groupMode := strings.Contains(definition, ",") || sharePipeValues && strings.Contains(definition, "|")
 	groupValue := NoValue
 	groupSeparate, groupAttached := false, false
 	for index, match := range matches {
