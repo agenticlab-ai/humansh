@@ -19,6 +19,12 @@ func main() {
 	if strings.Contains(name, "hang") {
 		time.Sleep(5 * time.Second)
 	}
+	if strings.Contains(name, "bsdusage") {
+		fmt.Fprintln(os.Stderr, name+": illegal option -- -")
+		fmt.Fprintf(os.Stderr, "usage: %s [-f | -i] [-dIPRrvWx] file ...\n", name)
+		fmt.Fprintln(os.Stderr, "       unlink [--] file")
+		os.Exit(64)
+	}
 	if strings.Contains(name, "huge") {
 		fmt.Fprintln(os.Stdout, "Usage: fixturevcs <COMMAND>")
 		fmt.Fprintln(os.Stdout, "Commands:")

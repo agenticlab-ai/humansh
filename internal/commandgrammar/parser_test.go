@@ -213,6 +213,192 @@ All commands:
 	}
 }
 
+func TestParseHelpExpandsBSDCompactShortOptions(t *testing.T) {
+	t.Parallel()
+	node, err := ParseHelp([]byte(`rm: illegal option -- -
+usage: rm [-f | -i] [-dIPRrvWx] file ...
+       unlink [--] file
+`), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"-f", "-i", "-d", "-I", "-P", "-R", "-r", "-v", "-W", "-x"} {
+		if option, exists := node.Options[name]; !exists || option != (OptionSpec{}) {
+			t.Errorf("compact option %s=%+v,%t", name, option, exists)
+		}
+	}
+	if _, exists := node.Options["-dIPRrvWx"]; !exists {
+		t.Fatalf("compact usage atom's exact spelling was not preserved: %v", node.Options)
+	}
+
+	session := &fakeHelpSession{nodes: map[string]HelpResult{"": {Node: node, Status: HelpOK}}}
+	analysis := NewAnalyzer(&fakeHelpSource{session: session}).Analyze(context.Background(), invocation("rm -rf internal/commandgrammar/"))
+	if analysis.Coverage != CoverageRecognized || analysis.StopReason != StopComplete || analysis.Boundary != 3 || analysis.RoleAt(1) != RoleOption || analysis.RoleAt(2) != RolePositional {
+		t.Fatalf("compact cluster analysis=%+v annotations=%+v", analysis, analysis.Annotations)
+	}
+	unknown := NewAnalyzer(&fakeHelpSource{session: &fakeHelpSession{nodes: map[string]HelpResult{"": {Node: node, Status: HelpOK}}}}).Analyze(context.Background(), invocation("rm -rz path"))
+	if unknown.StopReason != StopUnknownOption || !unknown.Uncertain() {
+		t.Fatalf("unknown compact member analysis=%+v", unknown)
+	}
+}
+
+func TestParseHelpHandlesCommonBSDCompactShortOptionLayouts(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		help        string
+		invocation  string
+		wantOptions []string
+	}{
+		{
+			name: "find mixed compact set",
+			help: `/usr/bin/find: illegal option -- -
+usage: find [-H | -L | -P] [-EXdsx] [-f path] path ... [expression]
+       find [-H | -L | -P] [-EXdsx] -f path [path ...] [expression]
+`,
+			invocation:  "find -ds .",
+			wantOptions: []string{"-E", "-X", "-d", "-s", "-x"},
+		},
+		{
+			name:        "ls symbol rich compact set",
+			help:        "ls: unrecognized option `--help'\nusage: ls [-@ABCFGHILOPRSTUWXabcdefghiklmnopqrstuvwxy1%,] [--color=when] [-D format] [file ...]\n",
+			invocation:  "ls -la .",
+			wantOptions: []string{"-@", "-A", "-a", "-l", "-1", "-%", "-,"},
+		},
+		{
+			name: "cp short alternative and longer compact set",
+			help: `/bin/cp: illegal option -- -
+usage: cp [-R [-H | -L | -P]] [-fi | -n] [-aclpSsvXx] source_file target_file
+       cp [-R [-H | -L | -P]] [-fi | -n] [-aclpSsvXx] source_file ... target_directory
+`,
+			invocation:  "cp -if source target",
+			wantOptions: []string{"-f", "-i", "-a", "-c", "-S", "-s", "-X", "-x"},
+		},
+		{
+			name: "mv short set corroborated across usage lines",
+			help: `/bin/mv: illegal option -- -
+usage: mv [-f | -i | -n] [-hv] source target
+       mv [-f | -i | -n] [-v] source ... directory
+`,
+			invocation:  "mv -vh source target",
+			wantOptions: []string{"-h", "-v"},
+		},
+		{
+			name: "mkdir short set with rejected long help",
+			help: `/bin/mkdir: illegal option -- -
+usage: mkdir [-pv] [-m mode] directory_name ...
+`,
+			invocation:  "mkdir -vp directory",
+			wantOptions: []string{"-p", "-v"},
+		},
+		{
+			name: "chmod short set with rejected long help",
+			help: `/bin/chmod: illegal option -- -
+usage: chmod [-fhv] [-R [-H | -L | -P]] mode file ...
+`,
+			invocation:  "chmod -hv file",
+			wantOptions: []string{"-f", "-h", "-v"},
+		},
+		{
+			name:        "du compact mixed set",
+			help:        "du: unrecognized option `--help'\nusage: du [-Aclnx] [-H | -L | -P] [-g | -h | -k | -m] [-a | -s | -d depth] [file ...]\n",
+			invocation:  "du -nx .",
+			wantOptions: []string{"-A", "-c", "-l", "-n", "-x"},
+		},
+		{
+			name:        "uniq four letter lowercase set",
+			help:        "uniq: unrecognized option `--help'\nusage: uniq [-cdiu] [-D[septype]] [-f fields] [-s chars] [input [output]]\n",
+			invocation:  "uniq -ud input",
+			wantOptions: []string{"-c", "-d", "-i", "-u"},
+		},
+		{
+			name: "ssh digit and letter set",
+			help: `/usr/bin/ssh: illegal option -- -
+usage: ssh [-46AaCfGgKkMNnqsTtVvXxYy] [-B bind_interface] [-b bind_address]
+           destination [command [argument ...]]
+`,
+			invocation:  "ssh -4v example.com",
+			wantOptions: []string{"-4", "-6", "-A", "-a", "-v"},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			node, err := ParseHelp([]byte(test.help), true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range test.wantOptions {
+				if option, exists := node.Options[name]; !exists || option != (OptionSpec{}) {
+					t.Errorf("compact option %s=%+v,%t", name, option, exists)
+				}
+			}
+			session := &fakeHelpSession{nodes: map[string]HelpResult{"": {Node: node, Status: HelpOK}}}
+			analysis := NewAnalyzer(&fakeHelpSource{session: session}).Analyze(context.Background(), invocation(test.invocation))
+			if analysis.Coverage != CoverageRecognized || analysis.StopReason != StopComplete {
+				t.Fatalf("compact analysis=%+v annotations=%+v", analysis, analysis.Annotations)
+			}
+		})
+	}
+}
+
+func TestParseHelpDoesNotSplitAmbiguousSingleDashWordsOrShareAlternativeValues(t *testing.T) {
+	t.Parallel()
+	node, err := ParseHelp([]byte(`Usage: tool [-q | -v] [-verbose] [-Ipath] [-fi] [-ABC] [-jN] [-j4] [-O2] [-sha256] [-fooBARBazQux FILE] [-noCacheByID] [-a | -o FILE] FILE
+
+Options:
+  -O | --output FILE  write output
+  -noCacheByID        preserve exact single-dash option
+`), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, exact := range []string{"-verbose", "-Ipath", "-fi", "-ABC", "-jN", "-j4", "-O2", "-sha256", "-fooBARBazQux", "-noCacheByID"} {
+		if _, exists := node.Options[exact]; !exists {
+			t.Errorf("ambiguous option spelling %q was not retained: %v", exact, node.Options)
+		}
+	}
+	for _, derived := range []string{"-I", "-f", "-B", "-j", "-4", "-2", "-h", "-6", "-b", "-Q", "-n", "-C", "-y"} {
+		if _, exists := node.Options[derived]; exists {
+			t.Errorf("ambiguous option spelling derived %q: %v", derived, node.Options)
+		}
+	}
+	if option := node.Options["-a"]; option.Value != NoValue {
+		t.Fatalf("alternative -a inherited another option's value: %+v", option)
+	}
+	if option := node.Options["-o"]; option.Value != RequiredValue || !option.AllowSeparate {
+		t.Fatalf("value-taking alternative -o=%+v", option)
+	}
+	if option := node.Options["-O"]; option.Value != RequiredValue || !option.AllowSeparate {
+		t.Fatalf("pipe-separated option aliases did not share value grammar: %+v", option)
+	}
+	if option := node.Options["-fooBARBazQux"]; option.Value != RequiredValue || !option.AllowSeparate {
+		t.Fatalf("mixed-case exact option lost its value grammar: %+v", option)
+	}
+
+	unbracketed, err := ParseHelp([]byte("Usage: tool -a | -o FILE\n"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if option := unbracketed.Options["-a"]; option.Value != NoValue {
+		t.Fatalf("unbracketed alternative -a inherited another option's value: %+v", option)
+	}
+	if option := unbracketed.Options["-o"]; option.Value != RequiredValue || !option.AllowSeparate {
+		t.Fatalf("unbracketed value-taking alternative -o=%+v", option)
+	}
+
+	bareExact, err := ParseHelp([]byte("Usage: tool [-q | -v] [-noCacheByID]\n  -noCacheByID\n"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, derived := range []string{"-n", "-C", "-B", "-I", "-D"} {
+		if _, exists := bareExact.Options[derived]; exists {
+			t.Errorf("bare exact option row derived %q: %v", derived, bareExact.Options)
+		}
+	}
+}
+
 func TestParseHelpDoesNotPromoteArgumentChoicesOrExecutableSuffixes(t *testing.T) {
 	t.Parallel()
 	node, err := ParseHelp([]byte(`Usage: my-tool [--color {auto,always,never}] {json,yaml} FILE
