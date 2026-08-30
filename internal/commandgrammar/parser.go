@@ -94,6 +94,12 @@ func ParseHelp(data []byte, complete bool) (NodeSpec, error) {
 			node.SubcommandsComplete = node.SubcommandsComplete || completeCommandHeader(trimmed)
 			continue
 		}
+		if isPositionalHeader(trimmed) {
+			flushCommandCandidates()
+			commandSection, optionSection, synopsisSection, usageContinuation = false, false, false, false
+			sawStructure, node.AcceptsPositionals = true, true
+			continue
+		}
 		if isOptionHeader(trimmed) {
 			flushCommandCandidates()
 			commandSection, optionSection, synopsisSection, usageContinuation = false, true, false, false
@@ -242,7 +248,17 @@ func completeCommandHeader(value string) bool {
 func isOptionHeader(value string) bool {
 	lower := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(value, ":")))
 	switch lower {
-	case "options", "option", "flags", "global options", "global flags", "optional arguments", "arguments":
+	case "options", "option", "flags", "global options", "global flags", "optional arguments":
+		return true
+	default:
+		return false
+	}
+}
+
+func isPositionalHeader(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(value, ":")))
+	switch lower {
+	case "arguments", "positional arguments", "operands":
 		return true
 	default:
 		return false

@@ -127,6 +127,7 @@ type NodeSpec struct {
 	Subcommands         map[string]struct{}
 	SubcommandState     SubcommandState
 	SubcommandsComplete bool
+	AcceptsPositionals  bool
 	Complete            bool
 }
 

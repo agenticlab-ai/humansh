@@ -213,6 +213,63 @@ All commands:
 	}
 }
 
+func TestParsedHelpAcceptsPositionalsAlongsideSubcommands(t *testing.T) {
+	t.Parallel()
+	root, err := ParseHelp([]byte(`Usage: zellij [OPTIONS] [COMMAND]
+
+Commands:
+  attach  Attach to a session
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+`), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attach, err := ParseHelp([]byte(`Usage: zellij attach [OPTIONS] [SESSION_NAME] [-- <INITIAL_COMMAND>...] [COMMAND]
+
+Commands:
+  options  Change the behaviour of zellij
+  help     Print this message or the help of the given subcommand(s)
+
+Arguments:
+  [SESSION_NAME]        Name of the session to attach to
+  [INITIAL_COMMAND]...  Command to run in the first pane of the session, if it is created
+
+Options:
+  -c, --create  Create a session if one does not exist
+  -h, --help    Print help
+`), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root.AcceptsPositionals {
+		t.Fatal("a command-only root was marked as accepting positional arguments")
+	}
+	if !attach.AcceptsPositionals {
+		t.Fatal("the explicit Arguments section was not retained")
+	}
+
+	session := &fakeHelpSession{nodes: map[string]HelpResult{
+		"":       {Node: root, Status: HelpOK},
+		"attach": {Node: attach, Status: HelpOK},
+	}}
+	analysis := NewAnalyzer(&fakeHelpSource{session: session}).Analyze(context.Background(), invocation("zellij attach -c pyxis-codex -- codex"))
+	if analysis.Coverage != CoverageRecognized || analysis.StopReason != StopComplete || analysis.Uncertain() {
+		t.Fatalf("zellij attach analysis=%+v annotations=%+v", analysis, analysis.Annotations)
+	}
+	wantRoles := []Role{RoleHead, RoleSubcommand, RoleOption, RolePositional, RoleOption, RolePositional}
+	for index, want := range wantRoles {
+		if got := analysis.RoleAt(index); got != want {
+			t.Errorf("role[%d]=%s, want %s", index, got, want)
+		}
+	}
+	if got := strings.Join(session.calls, ","); got != ",attach" {
+		t.Fatalf("help probes=%q, want root and attach only", got)
+	}
+}
+
 func TestParseHelpExpandsBSDCompactShortOptions(t *testing.T) {
 	t.Parallel()
 	node, err := ParseHelp([]byte(`rm: illegal option -- -

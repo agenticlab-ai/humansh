@@ -25,6 +25,8 @@ const (
 	deleteTargetRequest     = "please delete the e2e target directory"
 	deleteTargetCommand     = "rm -rf -- humansh-e2e-high-risk-target"
 	providerFailureRequest  = "show me a provider failure"
+	zellijAttachCommand     = "zellij attach -c pyxis-codex -- codex"
+	zellijExecutedOutput    = "HUMANSH_E2E_ZELLIJ_EXECUTED:<attach|-c|pyxis-codex|--|codex>"
 	privateEnvironmentValue = "HUMANSH_E2E_ENV_SECRET_DO_NOT_SEND"
 	privateFileValue        = "HUMANSH_E2E_FILE_SECRET_DO_NOT_SEND"
 )
@@ -61,6 +63,18 @@ zpty -w -n H $'ls -la\r'
 wait_for 'humansh-e2e-visible.txt' || exit 101
 eventually_dump '' || exit 102
 `)
+		fixture.requireProviderEvents(t, "", nil)
+	})
+
+	t.Run("zellij attach with a session and initial command executes literally", func(t *testing.T) {
+		fixture.runZshScenario(t, `
+zpty -w -n H "$HUMANSH_E2E_COMMAND"$'\r'
+wait_for "$HUMANSH_E2E_EXPECTED" || exit 136
+eventually_dump '' || exit 137
+`,
+			"HUMANSH_E2E_COMMAND", zellijAttachCommand,
+			"HUMANSH_E2E_EXPECTED", zellijExecutedOutput,
+		)
 		fixture.requireProviderEvents(t, "", nil)
 	})
 
@@ -224,6 +238,12 @@ func installZshFixture(t *testing.T) *installedFixture {
 	buildFixture.Dir = repo
 	if output, err := buildFixture.CombinedOutput(); err != nil {
 		t.Fatalf("build deterministic Codex fixture: %v\n%s", err, output)
+	}
+	fakeZellij := filepath.Join(providerBin, "zellij")
+	buildFixture = exec.Command("go", "build", "-trimpath", "-o", fakeZellij, "./tests/e2e/testdata/fakezellij")
+	buildFixture.Dir = repo
+	if output, err := buildFixture.CombinedOutput(); err != nil {
+		t.Fatalf("build deterministic Zellij fixture: %v\n%s", err, output)
 	}
 
 	env := isolatedEnvironment(t, home, providerBin)

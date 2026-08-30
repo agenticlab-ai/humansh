@@ -34,7 +34,7 @@ func (classifierHelpSession) Load(_ context.Context, prefix []string) commandgra
 			"-C":         {Value: commandgrammar.RequiredValue, AllowSeparate: true, AllowAttached: true},
 		},
 		SubcommandState:     commandgrammar.SubcommandsListed,
-		Subcommands:         map[string]struct{}{"status": {}, "commit": {}},
+		Subcommands:         map[string]struct{}{"status": {}, "commit": {}, "attach": {}},
 		Complete:            true,
 		SubcommandsComplete: true,
 	}
@@ -54,6 +54,17 @@ func (classifierHelpSession) Load(_ context.Context, prefix []string) commandgra
 		SubcommandState: commandgrammar.SubcommandsNone,
 		Complete:        true,
 	}
+	attach := commandgrammar.NodeSpec{
+		OptionsKnown: true,
+		Options: map[string]commandgrammar.OptionSpec{
+			"-c": {}, "--create": {},
+		},
+		SubcommandState:     commandgrammar.SubcommandsListed,
+		Subcommands:         map[string]struct{}{"options": {}, "help": {}},
+		SubcommandsComplete: true,
+		AcceptsPositionals:  true,
+		Complete:            true,
+	}
 	var node commandgrammar.NodeSpec
 	switch strings.Join(prefix, " ") {
 	case "":
@@ -62,6 +73,8 @@ func (classifierHelpSession) Load(_ context.Context, prefix []string) commandgra
 		node = status
 	case "commit":
 		node = commit
+	case "attach":
+		node = attach
 	default:
 		return commandgrammar.HelpResult{Status: commandgrammar.HelpUnavailable}
 	}
@@ -101,6 +114,8 @@ func TestNormativeExamples(t *testing.T) {
 		{"English-subcommand", "fixturevcs is failing please authenticate", shell.TokenCommand, true, Ambiguous},
 		{"English-operands", "fixturevcs status is failing please authenticate", shell.TokenCommand, true, Ambiguous},
 		{"quoted-option-value", `fixturevcs commit -m "please authenticate"`, shell.TokenCommand, true, Literal},
+		{"positionals-alongside-subcommands", "zellij attach -c pyxis-codex -- codex", shell.TokenCommand, true, Literal},
+		{"English-positional-alongside-subcommands", "zellij attach is failing please authenticate", shell.TokenCommand, true, Ambiguous},
 		{"subcommand-typo", "fixturevcs statsu", shell.TokenCommand, true, Ambiguous},
 		{"flags-path", "ls -lah ~/Downloads", shell.TokenCommand, false, Literal},
 		{"assignment", "FOO=bar", shell.TokenUnresolved, false, Literal},

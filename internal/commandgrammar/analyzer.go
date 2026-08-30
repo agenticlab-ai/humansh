@@ -80,6 +80,9 @@ func (a *HelpAnalyzer) Analyze(ctx context.Context, inv Invocation) Analysis {
 				if strings.HasPrefix(word.Text, "-") {
 					return stopAt(analysis, index, CoverageIndeterminate, StopUnknownOption)
 				}
+				if node.AcceptsPositionals {
+					return consumeLeaf(inv.Words, index, node, analysis)
+				}
 				if !node.Complete || !node.SubcommandsComplete {
 					markRemainder(&analysis, index, RolePositional)
 					analysis.Coverage = CoveragePartial
