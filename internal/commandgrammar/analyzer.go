@@ -91,6 +91,12 @@ func (a *HelpAnalyzer) Analyze(ctx context.Context, inv Invocation) Analysis {
 				}
 				return stopAt(analysis, index, CoverageIndeterminate, StopUndocumentedSubcommand)
 			}
+			if _, unprobed := node.UnprobedSubcommands[word.Text]; unprobed {
+				markRemainder(&analysis, index, RolePositional)
+				analysis.Coverage = CoveragePartial
+				analysis.Boundary = index
+				return finish(analysis, len(inv.Words))
+			}
 			analysis.Annotations[index].Role = RoleSubcommand
 			prefix = append(prefix, word.Text)
 			index++

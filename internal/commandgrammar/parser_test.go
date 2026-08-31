@@ -145,7 +145,7 @@ Examples:
 `,
 			commands:     []string{"create", "get", "inspect", "explain"},
 			state:        SubcommandsListed,
-			optionsKnown: true,
+			optionsKnown: false,
 		},
 		{
 			name: "wrapped-command-list",
@@ -616,6 +616,80 @@ func TestParseHelpRecognizesDynamicBareCommandMetavar(t *testing.T) {
 	node, err := ParseHelp([]byte("Usage: fixture [OPTIONS] COMMAND [ARGS]...\n"), true)
 	if err != nil || node.SubcommandState != SubcommandsUnknown {
 		t.Fatalf("node=%+v err=%v", node, err)
+	}
+}
+
+func TestParseHelpLeavesOpaqueUsageFlagsIncomplete(t *testing.T) {
+	t.Parallel()
+	node, err := ParseHelp([]byte("usage: go test [build/test flags] [packages] [build/test flags & test binary flags]\n"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.OptionsKnown {
+		t.Fatalf("opaque flag groups were treated as an exhaustive option list: %+v", node)
+	}
+
+	root := NodeSpec{
+		OptionsKnown:        true,
+		Options:             map[string]OptionSpec{},
+		SubcommandState:     SubcommandsListed,
+		Subcommands:         map[string]struct{}{"test": {}},
+		SubcommandsComplete: true,
+		Complete:            true,
+	}
+	session := &fakeHelpSession{nodes: map[string]HelpResult{
+		"":     {Node: root, Status: HelpOK},
+		"test": {Node: node, Status: HelpOK},
+	}}
+	analysis := NewAnalyzer(&fakeHelpSource{session: session}).Analyze(context.Background(), invocation("go test -cover"))
+	if analysis.Coverage != CoveragePartial || analysis.StopReason != StopComplete || analysis.Uncertain() || analysis.RoleAt(2) != RoleOption {
+		t.Fatalf("go test -cover analysis=%+v annotations=%+v", analysis, analysis.Annotations)
+	}
+}
+
+func TestParseHelpRecognizesDocumentedHelpFormWithoutProbingIt(t *testing.T) {
+	t.Parallel()
+	node, err := ParseHelp([]byte(`Go is a tool for managing Go source code.
+
+Usage:
+
+	go <command> [arguments]
+
+The commands are:
+
+	build       compile packages and dependencies
+	test        test packages
+
+Use "go help <command>" for more information about a command.
+
+Additional help topics:
+
+	packages    package lists and patterns
+
+Use "go help <topic>" for more information about that topic.
+`), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := node.Subcommands["help"]; !exists {
+		t.Fatalf("documented help form was not retained as a subcommand: %+v", node)
+	}
+
+	session := &fakeHelpSession{nodes: map[string]HelpResult{
+		"": {Node: node, Status: HelpOK},
+	}}
+	analysis := NewAnalyzer(&fakeHelpSource{session: session}).Analyze(context.Background(), invocation("go help test"))
+	if analysis.Coverage != CoveragePartial || analysis.StopReason != StopComplete || analysis.Uncertain() {
+		t.Fatalf("go help test analysis=%+v annotations=%+v", analysis, analysis.Annotations)
+	}
+	wantRoles := []Role{RoleHead, RolePositional, RolePositional}
+	for index, want := range wantRoles {
+		if got := analysis.RoleAt(index); got != want {
+			t.Errorf("role[%d]=%s, want %s", index, got, want)
+		}
+	}
+	if got := strings.Join(session.calls, ","); got != "" {
+		t.Fatalf("documented positional help was executed as a nested probe: %q", got)
 	}
 }
 
