@@ -34,7 +34,8 @@ func (classifierHelpSession) Load(_ context.Context, prefix []string) commandgra
 			"-C":         {Value: commandgrammar.RequiredValue, AllowSeparate: true, AllowAttached: true},
 		},
 		SubcommandState:     commandgrammar.SubcommandsListed,
-		Subcommands:         map[string]struct{}{"status": {}, "commit": {}, "attach": {}, "test": {}},
+		Subcommands:         map[string]struct{}{"status": {}, "commit": {}, "attach": {}, "test": {}, "help": {}},
+		UnprobedSubcommands: map[string]struct{}{"help": {}},
 		Complete:            true,
 		SubcommandsComplete: true,
 	}

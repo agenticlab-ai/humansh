@@ -647,6 +647,52 @@ func TestParseHelpLeavesOpaqueUsageFlagsIncomplete(t *testing.T) {
 	}
 }
 
+func TestParseHelpRecognizesDocumentedHelpFormWithoutProbingIt(t *testing.T) {
+	t.Parallel()
+	node, err := ParseHelp([]byte(`Go is a tool for managing Go source code.
+
+Usage:
+
+	go <command> [arguments]
+
+The commands are:
+
+	build       compile packages and dependencies
+	test        test packages
+
+Use "go help <command>" for more information about a command.
+
+Additional help topics:
+
+	packages    package lists and patterns
+
+Use "go help <topic>" for more information about that topic.
+`), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := node.Subcommands["help"]; !exists {
+		t.Fatalf("documented help form was not retained as a subcommand: %+v", node)
+	}
+
+	session := &fakeHelpSession{nodes: map[string]HelpResult{
+		"": {Node: node, Status: HelpOK},
+	}}
+	analysis := NewAnalyzer(&fakeHelpSource{session: session}).Analyze(context.Background(), invocation("go help test"))
+	if analysis.Coverage != CoveragePartial || analysis.StopReason != StopComplete || analysis.Uncertain() {
+		t.Fatalf("go help test analysis=%+v annotations=%+v", analysis, analysis.Annotations)
+	}
+	wantRoles := []Role{RoleHead, RolePositional, RolePositional}
+	for index, want := range wantRoles {
+		if got := analysis.RoleAt(index); got != want {
+			t.Errorf("role[%d]=%s, want %s", index, got, want)
+		}
+	}
+	if got := strings.Join(session.calls, ","); got != "" {
+		t.Fatalf("documented positional help was executed as a nested probe: %q", got)
+	}
+}
+
 func FuzzParseHelpNeverPanics(f *testing.F) {
 	for _, seed := range [][]byte{
 		[]byte("Usage: fixture [OPTIONS] <COMMAND>\nCommands:\n  run  run it\n"),

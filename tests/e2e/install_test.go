@@ -28,6 +28,7 @@ const (
 	zellijAttachCommand     = "zellij attach -c pyxis-codex -- codex"
 	zellijExecutedOutput    = "HUMANSH_E2E_ZELLIJ_EXECUTED:<attach|-c|pyxis-codex|--|codex>"
 	goCoverCommand          = "go test -cover"
+	goHelpTestCommand       = "go help test"
 	privateEnvironmentValue = "HUMANSH_E2E_ENV_SECRET_DO_NOT_SEND"
 	privateFileValue        = "HUMANSH_E2E_FILE_SECRET_DO_NOT_SEND"
 )
@@ -75,6 +76,18 @@ eventually_dump '' || exit 139
 `, "HUMANSH_E2E_COMMAND", goCoverCommand)
 		if strings.Contains(output, "Not sure whether this is English or a command") {
 			t.Fatalf("real Go command was left ambiguous:\n%s", output)
+		}
+		fixture.requireProviderEvents(t, "", nil)
+	})
+
+	t.Run("go help test executes as a documented help form", func(t *testing.T) {
+		output := fixture.runZshScenario(t, `
+zpty -w -n H "$HUMANSH_E2E_COMMAND"$'\r'
+wait_for 'automates testing the packages named' || exit 140
+eventually_dump '' || exit 141
+`, "HUMANSH_E2E_COMMAND", goHelpTestCommand)
+		if strings.Contains(output, "Not sure whether this is English or a command") {
+			t.Fatalf("documented Go help command was left ambiguous:\n%s", output)
 		}
 		fixture.requireProviderEvents(t, "", nil)
 	})

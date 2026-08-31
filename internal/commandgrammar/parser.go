@@ -45,6 +45,7 @@ func ParseHelp(data []byte, complete bool) (NodeSpec, error) {
 	node := NodeSpec{
 		Options:             make(map[string]OptionSpec),
 		Subcommands:         make(map[string]struct{}),
+		UnprobedSubcommands: make(map[string]struct{}),
 		SubcommandsComplete: false,
 		Complete:            complete,
 	}
@@ -85,6 +86,11 @@ func ParseHelp(data []byte, complete bool) (NodeSpec, error) {
 		if trimmed == "" {
 			usageContinuation = false
 			continue
+		}
+		if subcommand, ok := documentedPositionalHelpForm(trimmed); ok {
+			node.Subcommands[subcommand] = struct{}{}
+			node.UnprobedSubcommands[subcommand] = struct{}{}
+			sawStructure = true
 		}
 
 		if isCommandHeader(trimmed) {
@@ -323,6 +329,50 @@ func containsCommandMarker(value string) bool {
 		}
 	}
 	return false
+}
+
+// documentedPositionalHelpForm accepts only a tightly bounded conventional
+// syntax sentence such as `Use "tool help <command>" ...`. The help word is
+// retained for classification, but is marked unprobed so it can never become
+// `tool help --help` in the runtime analyzer.
+func documentedPositionalHelpForm(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	if len(value) < len(`Use "x"`) || !strings.EqualFold(value[:4], "use ") {
+		return "", false
+	}
+	quote := value[4]
+	if quote != '\'' && quote != '"' {
+		return "", false
+	}
+	remainder := value[5:]
+	end := strings.IndexByte(remainder, quote)
+	if end < 0 {
+		return "", false
+	}
+	fields := strings.Fields(remainder[:end])
+	if len(fields) < 3 || !validCommandName(fields[0]) || fields[1] != "help" {
+		return "", false
+	}
+	for _, operand := range fields[2:] {
+		if !helpFormMetavariable(operand) {
+			return "", false
+		}
+	}
+	return fields[1], true
+}
+
+func helpFormMetavariable(value string) bool {
+	value = strings.TrimSuffix(value, "...")
+	for len(value) >= 2 && (value[0] == '[' && value[len(value)-1] == ']' || value[0] == '(' && value[len(value)-1] == ')') {
+		value = value[1 : len(value)-1]
+	}
+	if len(value) >= 3 && value[0] == '<' && value[len(value)-1] == '>' {
+		return validCommandName(value[1 : len(value)-1])
+	}
+	if strings.EqualFold(value, "topic") || strings.EqualFold(value, "topics") {
+		return true
+	}
+	return beginsMetavar(value)
 }
 
 func commandRow(line string) []string {

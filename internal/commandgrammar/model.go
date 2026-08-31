@@ -122,9 +122,13 @@ const (
 
 // NodeSpec is the normalized, command-agnostic result of one help probe.
 type NodeSpec struct {
-	Options             map[string]OptionSpec
-	OptionsKnown        bool
-	Subcommands         map[string]struct{}
+	Options      map[string]OptionSpec
+	OptionsKnown bool
+	Subcommands  map[string]struct{}
+	// UnprobedSubcommands are advertised invocation forms whose word and tail
+	// remain inspectable operands. They must never be used as recursive help
+	// prefixes; positional help is deliberately outside the probe contract.
+	UnprobedSubcommands map[string]struct{}
 	SubcommandState     SubcommandState
 	SubcommandsComplete bool
 	AcceptsPositionals  bool
