@@ -34,7 +34,7 @@ func (classifierHelpSession) Load(_ context.Context, prefix []string) commandgra
 			"-C":         {Value: commandgrammar.RequiredValue, AllowSeparate: true, AllowAttached: true},
 		},
 		SubcommandState:     commandgrammar.SubcommandsListed,
-		Subcommands:         map[string]struct{}{"status": {}, "commit": {}, "attach": {}},
+		Subcommands:         map[string]struct{}{"status": {}, "commit": {}, "attach": {}, "test": {}},
 		Complete:            true,
 		SubcommandsComplete: true,
 	}
@@ -65,6 +65,10 @@ func (classifierHelpSession) Load(_ context.Context, prefix []string) commandgra
 		AcceptsPositionals:  true,
 		Complete:            true,
 	}
+	goTest, err := commandgrammar.ParseHelp([]byte("usage: go test [build/test flags] [packages] [build/test flags & test binary flags]\n"), true)
+	if err != nil {
+		return commandgrammar.HelpResult{Status: commandgrammar.HelpUnparseable}
+	}
 	var node commandgrammar.NodeSpec
 	switch strings.Join(prefix, " ") {
 	case "":
@@ -75,6 +79,8 @@ func (classifierHelpSession) Load(_ context.Context, prefix []string) commandgra
 		node = commit
 	case "attach":
 		node = attach
+	case "test":
+		node = goTest
 	default:
 		return commandgrammar.HelpResult{Status: commandgrammar.HelpUnavailable}
 	}

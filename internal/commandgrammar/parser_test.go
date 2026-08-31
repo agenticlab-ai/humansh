@@ -145,7 +145,7 @@ Examples:
 `,
 			commands:     []string{"create", "get", "inspect", "explain"},
 			state:        SubcommandsListed,
-			optionsKnown: true,
+			optionsKnown: false,
 		},
 		{
 			name: "wrapped-command-list",
@@ -616,6 +616,34 @@ func TestParseHelpRecognizesDynamicBareCommandMetavar(t *testing.T) {
 	node, err := ParseHelp([]byte("Usage: fixture [OPTIONS] COMMAND [ARGS]...\n"), true)
 	if err != nil || node.SubcommandState != SubcommandsUnknown {
 		t.Fatalf("node=%+v err=%v", node, err)
+	}
+}
+
+func TestParseHelpLeavesOpaqueUsageFlagsIncomplete(t *testing.T) {
+	t.Parallel()
+	node, err := ParseHelp([]byte("usage: go test [build/test flags] [packages] [build/test flags & test binary flags]\n"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.OptionsKnown {
+		t.Fatalf("opaque flag groups were treated as an exhaustive option list: %+v", node)
+	}
+
+	root := NodeSpec{
+		OptionsKnown:        true,
+		Options:             map[string]OptionSpec{},
+		SubcommandState:     SubcommandsListed,
+		Subcommands:         map[string]struct{}{"test": {}},
+		SubcommandsComplete: true,
+		Complete:            true,
+	}
+	session := &fakeHelpSession{nodes: map[string]HelpResult{
+		"":     {Node: root, Status: HelpOK},
+		"test": {Node: node, Status: HelpOK},
+	}}
+	analysis := NewAnalyzer(&fakeHelpSource{session: session}).Analyze(context.Background(), invocation("go test -cover"))
+	if analysis.Coverage != CoveragePartial || analysis.StopReason != StopComplete || analysis.Uncertain() || analysis.RoleAt(2) != RoleOption {
+		t.Fatalf("go test -cover analysis=%+v annotations=%+v", analysis, analysis.Annotations)
 	}
 }
 

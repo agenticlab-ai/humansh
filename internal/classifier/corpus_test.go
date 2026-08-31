@@ -74,6 +74,7 @@ var representativeCorpus = []corpusCase{
 	strongLiteral("brew-install-jq", "brew install jq", shell.TokenCommand, "resolved_first_token"),
 	strongLiteral("gh-pr-list", "gh pr list", shell.TokenCommand, "resolved_first_token"),
 	strongLiteral("go-test", "go test", shell.TokenCommand, "resolved_first_token"),
+	withGrammar(strongLiteral("go-test-cover-opaque-help-flags", "go test -cover", shell.TokenCommand, "resolved_first_token", "conventional_flag", "command_grammar_partial")),
 	strongLiteral("make-build", "make build", shell.TokenCommand, "resolved_first_token"),
 	strongLiteral("rg-todo", "rg TODO", shell.TokenCommand, "resolved_first_token"),
 	strongLiteral("jq-dot", "jq .", shell.TokenCommand, "resolved_first_token"),

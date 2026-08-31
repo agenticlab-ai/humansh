@@ -49,7 +49,7 @@ func ParseHelp(data []byte, complete bool) (NodeSpec, error) {
 		Complete:            complete,
 	}
 	var commandSection, optionSection, synopsisSection, usageContinuation bool
-	var sawStructure, sawUsage, sawCommandMarker bool
+	var sawStructure, sawUsage, sawCommandMarker, sawOptionSection, sawOpaqueOptions bool
 	var usageLines []string
 	declaredOptions := make(map[string]OptionSpec)
 	shortOptionDiagnostic := rejectsLongHelpOption(text)
@@ -103,7 +103,7 @@ func ParseHelp(data []byte, complete bool) (NodeSpec, error) {
 		if isOptionHeader(trimmed) {
 			flushCommandCandidates()
 			commandSection, optionSection, synopsisSection, usageContinuation = false, true, false, false
-			node.OptionsKnown, sawStructure = true, true
+			node.OptionsKnown, sawStructure, sawOptionSection = true, true, true
 			continue
 		}
 		if isSynopsisHeader(trimmed) {
@@ -128,6 +128,7 @@ func ParseHelp(data []byte, complete bool) (NodeSpec, error) {
 			sawStructure, sawUsage, node.OptionsKnown = true, true, true
 			usageLines = append(usageLines, line)
 			parseUsageOptions(line, node.Options)
+			sawOpaqueOptions = sawOpaqueOptions || hasOpaqueOptionGroup(line)
 			if containsCommandMarker(line) || hasPositionalBraceChoice(line) {
 				sawCommandMarker = true
 			}
@@ -151,6 +152,9 @@ func ParseHelp(data []byte, complete bool) (NodeSpec, error) {
 	}
 	flushCommandCandidates()
 	mergeOptions(node.Options, inferCompactUsageOptions(usageLines, node.Options, declaredOptions, shortOptionDiagnostic))
+	if sawOpaqueOptions && !sawOptionSection && len(declaredOptions) == 0 {
+		node.OptionsKnown = false
+	}
 
 	if len(node.Subcommands) > 0 {
 		node.SubcommandState = SubcommandsListed
@@ -421,6 +425,28 @@ func parseUsageOptions(line string, destination map[string]OptionSpec) {
 			mergeOptions(destination, parseOptionGroupWithPipeAliases(group, false))
 		}
 	}
+}
+
+// hasOpaqueOptionGroup identifies usage atoms such as [OPTIONS], [global
+// flags], and Go's [build/test flags]. Without a corresponding Options/Flags
+// section, those placeholders explicitly say that the synopsis omitted the
+// accepted spellings, so absence from the parsed option map is inconclusive
+// unless exact option-definition rows appear elsewhere in the help output.
+func hasOpaqueOptionGroup(value string) bool {
+	for _, group := range bracketGroups(value) {
+		// An atom containing a dash may instead declare an exact option whose
+		// value happens to be named FLAGS, as in [--flags FLAGS].
+		if strings.Contains(group, "-") {
+			continue
+		}
+		lower := strings.ToLower(group)
+		for _, marker := range []string{"option", "options", "flag", "flags"} {
+			if containsWord(lower, marker) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type usageOptionAtom struct {
