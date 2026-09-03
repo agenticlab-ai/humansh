@@ -298,7 +298,7 @@ exit 91`
 	}
 }
 
-func TestInteractiveInstallerRunsOnboardingAfterInstallationCommits(t *testing.T) {
+func TestPipedInteractiveInstallerRestoresBinaryRemovedDuringSetupBeforeOnboarding(t *testing.T) {
 	repo := repositoryRoot(t)
 	home := t.TempDir()
 	fixtures := filepath.Join(home, "fixtures")
@@ -308,7 +308,7 @@ func TestInteractiveInstallerRunsOnboardingAfterInstallationCommits(t *testing.T
 	replacement := filepath.Join(fixtures, "replacement")
 	program := `#!/bin/sh
 case ${1-} in
-  setup) echo SETUP_COMPLETE ;;
+  setup) echo SETUP_COMPLETE; rm -f "$0" ;;
   onboarding) echo ONBOARDING_STARTED ;;
   *) exit 2 ;;
 esac
@@ -325,7 +325,7 @@ esac
 		t.Fatal(err)
 	}
 	wrapper := filepath.Join(fixtures, "run-installer")
-	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\nsh \"$HUMANSH_INSTALLER\" --local\nresult=$?\necho INSTALL_STATUS:$result\n"), 0o755); err != nil {
+	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\nsh \"$HUMANSH_INSTALLER\" --local </dev/null\nresult=$?\necho INSTALL_STATUS:$result\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	env := isolatedEnvironment(home)
@@ -352,10 +352,18 @@ exit 91`
 	}
 	text := string(output)
 	setupIndex := strings.Index(text, "SETUP_COMPLETE")
+	restoredIndex := strings.Index(text, "installed binary disappeared during setup and was restored")
 	installedIndex := strings.Index(text, "Installed humansh to")
 	onboardingIndex := strings.Index(text, "ONBOARDING_STARTED")
-	if setupIndex < 0 || installedIndex <= setupIndex || onboardingIndex <= installedIndex {
-		t.Fatalf("installer did not run onboarding after setup and installation commit:\n%s", text)
+	if setupIndex < 0 || restoredIndex <= setupIndex || installedIndex <= restoredIndex || onboardingIndex <= installedIndex {
+		t.Fatalf("installer did not restore the binary and run onboarding after setup:\n%s", text)
+	}
+	if strings.Contains(text, "No such file or directory") || strings.Contains(text, "onboarding could not be shown") {
+		t.Fatalf("installer reproduced the missing-binary onboarding failure:\n%s", text)
+	}
+	installed := filepath.Join(home, ".local", "bin", "humansh")
+	if info, err := os.Stat(installed); err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("restored installed binary: info=%v err=%v\n%s", info, err, text)
 	}
 }
 

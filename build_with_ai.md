@@ -2128,8 +2128,9 @@ It should:
 1. Build the Go binary if needed.
 2. Install to `~/.local/bin/humansh` without `sudo`.
 3. Run `humansh setup` interactively when stdin is a TTY.
-4. After setup commits and the binary installation is committed, run `humansh onboarding` on the same interactive terminal. Onboarding failure must not roll back a successful installation; print the command for retrying it.
-5. Tell the user to use a new terminal so each configured shell loads its own integration. Do not execute a shell automatically because an installer child cannot replace its parent process and cannot reliably identify a nested current shell from `$SHELL`.
+4. After setup succeeds, verify that the installed executable is still the regular, executable binary staged by the installer. If it disappeared while setup or a provider subprocess was running, atomically restore it from the staged binary before committing; fail closed on any other unexpected replacement.
+5. After setup commits and the binary installation is committed, run `humansh onboarding` on the same interactive terminal. Onboarding failure must not roll back a successful installation; print the command for retrying it.
+6. Tell the user to use a new terminal so each configured shell loads its own integration. Do not execute a shell automatically because an installer child cannot replace its parent process and cannot reliably identify a nested current shell from `$SHELL`.
 
 Also provide:
 
@@ -2746,6 +2747,7 @@ Cover:
 - Managed-block exports for `smart_enter`, clear-line, force-translate, and force-literal exactly reflect typed config; changing them rewrites only the block, leaves the embedded asset and `shell_asset_sha256` unchanged, and is detected by `doctor` if the block drifts.
 - Unsafe binding text is rejected before startup-file rendering; no config value can inject shell syntax.
 - Home-directory working context is serialized as `~`, never the username.
+- A piped interactive installer uses `/dev/tty`; if setup or a provider subprocess removes the installed binary, the installer restores and verifies it before reporting success or launching onboarding.
 
 ### 20.9 Zsh end-to-end tests
 

@@ -145,6 +145,25 @@ if [ "$setup_status" -ne 0 ]; then
 	echo "humansh installer: setup did not complete; rolling back the binary installation." >&2
 	exit "$setup_status"
 fi
+binary_restored=0
+if [ ! -e "$binary" ] && [ ! -L "$binary" ]; then
+	binary_temp=$(mktemp "$install_dir/.humansh-install.XXXXXX")
+	install -m 0755 "$source_binary" "$binary_temp"
+	if [ -e "$binary" ] || [ -L "$binary" ]; then
+		echo "humansh installer: $binary reappeared unexpectedly during recovery; refusing to overwrite it." >&2
+		exit 1
+	fi
+	mv "$binary_temp" "$binary"
+	binary_temp=
+	binary_restored=1
+fi
+if [ ! -f "$binary" ] || [ -L "$binary" ] || [ ! -x "$binary" ] || ! cmp -s "$source_binary" "$binary"; then
+	echo "humansh installer: the installed binary changed unexpectedly during setup; rolling back the binary installation." >&2
+	exit 1
+fi
+if [ "$binary_restored" -eq 1 ]; then
+	echo "humansh installer: the installed binary disappeared during setup and was restored."
+fi
 install_committed=1
 [ -z "$previous_binary" ] || rm -f "$previous_binary"
 previous_binary=
