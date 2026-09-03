@@ -12,6 +12,8 @@ exec zsh
 
 Run `humansh setup` without naming a shell. It configures every usable supported shell automatically. Bash 4.3+ is required so Humansh can safely capture and restore existing Readline shell-command bindings. The `/bin/bash` shipped by macOS is 3.2, so automatic setup skips it and continues with Zsh. Install a current Bash, ensure it is the `bash` found in `PATH`, and rerun `humansh setup` to add Bash support.
 
+Setup updates startup files, but it cannot change the already-running parent shell. If a natural-language line such as `list files` produces `zsh: command not found: list` immediately after installation, open a new terminal or run `exec zsh`; do not run the natural-language request as a literal command again until the new shell has loaded the managed block. If a new shell prints that the Humansh binary is missing, rerun the installer before using the integration.
+
 Humansh cannot always modify `.zshrc` or `.bashrc`. Setup runs as the current user without `sudo`, requires owner-writable regular files, and atomically replaces them through writable parent directories. For a symlink, those checks apply to the resolved regular-file target. Interactive setup detects common access failures before confirmation and offers to continue without editing shell files. `humansh setup --no-shell-change` prints the exact block for every detected integration; it cannot be combined with an integration restriction that would leave an old managed block active.
 
 Humansh is installed before `zsh-syntax-highlighting` so that plugin can wrap the widget. If the binary is moved or deleted, the widget fails open to the previous Enter binding and prints a one-time warning.

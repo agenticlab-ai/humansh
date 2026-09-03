@@ -62,7 +62,7 @@ Bash integration needs 4.3 or newer so humansh can safely capture and restore ex
 curl -fsSL https://humansh.com/install | sh
 ```
 
-This downloads the installer, fetches the matching binary from the latest release, and verifies its SHA-256 checksum before installing to `~/.local/bin`. No `sudo`, and no third-party software is installed on your behalf.
+This downloads the installer, fetches the matching binary from the latest release, and verifies its SHA-256 checksum before installing to `~/.local/bin`. The installer verifies the binary again after guided setup and restores it from that checked download if another process removed it before installation committed. No `sudo`, and no third-party software is installed on your behalf.
 
 From a checkout:
 
@@ -78,7 +78,7 @@ humansh setup
 
 Setup shows you the shell modes, provider, model, privacy setting, timeout, and shortcuts, plus the exact startup-file patches it will apply — and writes nothing until you confirm. `--yes` runs it non-interactively. See [docs/setup.md](docs/setup.md) for the full flow, including OpenRouter key handling and pinning a specific provider executable.
 
-Open a new terminal, then try:
+The terminal that launched the installer keeps its old shell bindings. Open a new terminal (or run `exec zsh` for Zsh), then try:
 
 ```text
 show me the largest files in this folder

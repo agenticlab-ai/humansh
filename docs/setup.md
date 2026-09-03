@@ -27,7 +27,7 @@ See [security](security.md) for why a same-host checksum establishes integrity b
 ./scripts/install.sh --local
 ```
 
-The installer replaces the binary atomically, and restores the previous binary if interactive setup does not complete.
+The installer replaces the binary atomically, and restores the previous binary if interactive setup does not complete. Before it commits, it verifies the installed binary against the staged build; if the binary disappeared while setup was running, the installer atomically restores it from that staged copy before starting onboarding.
 
 ## Choosing shells
 
