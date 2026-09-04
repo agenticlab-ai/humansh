@@ -36,13 +36,13 @@ func TestWorkingDirectoryLabelPrivacyModes(t *testing.T) {
 
 func TestAvailableToolsUsesOnlyFixedAllowlist(t *testing.T) {
 	bin := t.TempDir()
-	for _, name := range []string{"git", "rg", "not-allowed"} {
+	for _, name := range []string{"git", "ls", "rg", "not-allowed"} {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte("fixture"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Setenv("PATH", bin)
-	if got, want := (Local{}).AvailableTools(), []string{"git", "rg"}; !reflect.DeepEqual(got, want) {
+	if got, want := (Local{}).AvailableTools(), []string{"git", "ls", "rg"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("tools=%v want %v", got, want)
 	}
 }

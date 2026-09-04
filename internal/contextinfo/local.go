@@ -33,7 +33,7 @@ func (Local) WorkingDirectoryLabel(mode, cwd string) string {
 	return base
 }
 
-var toolAllowlist = []string{"awk", "brew", "curl", "docker", "fd", "find", "fzf", "gh", "git", "grep", "jq", "kubectl", "lsof", "make", "node", "npm", "pnpm", "python3", "rg", "sed", "sort", "ssh", "tar", "xargs", "yarn"}
+var toolAllowlist = []string{"awk", "brew", "curl", "docker", "fd", "find", "fzf", "gh", "git", "grep", "jq", "kubectl", "ls", "lsof", "make", "node", "npm", "pnpm", "python3", "rg", "sed", "sort", "ssh", "tar", "xargs", "yarn"}
 
 func (Local) AvailableTools() []string {
 	out := make([]string, 0, len(toolAllowlist))

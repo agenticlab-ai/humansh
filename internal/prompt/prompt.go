@@ -17,7 +17,7 @@ Rules:
 3. Do not include a shell prompt, Markdown, code fences, commentary, or multiple alternatives in command.
 4. Preserve exact paths, names, branches, identifiers, numbers, ports, and quoted strings from the request.
 5. Prefer commands and flags compatible with the stated operating system and target shell.
-6. Prefer an already available standard tool over installing or reimplementing one.
+6. Prefer the simplest conventional command that directly satisfies the request, using an available standard tool; avoid unnecessary flags, pipelines, and verbose equivalents.
 7. Do not use sudo, privilege escalation, package installation, destructive force flags, or recursive deletion unless explicitly requested.
 8. Never use eval, encoded payloads, hidden control characters, or download-and-pipe-to-shell patterns.
 9. Do not assume access to files, directory listings, shell history, environment variables, or repository contents.
