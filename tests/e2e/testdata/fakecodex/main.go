@@ -21,6 +21,7 @@ const (
 	providerFailureRequest  = "show me a provider failure"
 	privateEnvironmentValue = "HUMANSH_E2E_ENV_SECRET_DO_NOT_SEND"
 	privateFileValue        = "HUMANSH_E2E_FILE_SECRET_DO_NOT_SEND"
+	simpleCommandGuidance   = "Prefer the simplest conventional command"
 )
 
 type event struct {
@@ -65,8 +66,8 @@ func main() {
 		fail("translation received private environment or file content")
 	}
 
-	request := requestInput(input)
-	result, ok := fixtureResponse(request)
+	request, availableTools := requestInput(input)
+	result, ok := fixtureResponse(request, availableTools, bytes.Contains(input, []byte(simpleCommandGuidance)))
 	if !ok {
 		fail("translation fixture received an unexpected request: %q", request)
 	}
@@ -94,7 +95,7 @@ func main() {
 	record("completed", request)
 }
 
-func requestInput(prompt []byte) string {
+func requestInput(prompt []byte) (string, []string) {
 	const begin = "REQUEST_JSON_BEGIN\n"
 	const end = "\nREQUEST_JSON_END"
 	start := bytes.Index(prompt, []byte(begin))
@@ -107,22 +108,31 @@ func requestInput(prompt []byte) string {
 		fail("translation prompt omitted its closing request boundary")
 	}
 	var request struct {
-		Input string `json:"input"`
+		Input          string   `json:"input"`
+		AvailableTools []string `json:"available_tools"`
 	}
 	if err := json.Unmarshal(prompt[start:start+finish], &request); err != nil {
 		fail("decode translation request: %v", err)
 	}
-	return request.Input
+	return request.Input, request.AvailableTools
 }
 
-func fixtureResponse(request string) (response, bool) {
+func fixtureResponse(request string, availableTools []string, preferSimpleCommands bool) (response, bool) {
+	if request == shortListRequest && (!contains(availableTools, "ls") || !preferSimpleCommands) {
+		return response{
+			Status:      "ok",
+			Command:     "find . -maxdepth 1 -mindepth 1 -print",
+			Explanation: "Lists entries immediately below the current directory.",
+			Assumptions: []string{},
+		}, true
+	}
 	tests := []struct {
 		request     string
 		command     string
 		explanation string
 	}{
 		{listRequest, "ls -la", "Lists every entry in the current directory."},
-		{shortListRequest, "ls -la", "Lists every entry in the current directory."},
+		{shortListRequest, "ls", "Lists entries in the current directory."},
 		{ambiguousRMRequest, "man rm", "Opens the manual for rm so its expected arguments can be checked."},
 		{findContentRequest, "grep -R -- 'ABC' .", "Finds files below the current directory that contain ABC."},
 		{createMarkerRequest, "touch humansh-e2e-generated-marker", "Creates the requested marker file."},
@@ -140,6 +150,15 @@ func fixtureResponse(request string) (response, bool) {
 		}
 	}
 	return response{}, false
+}
+
+func contains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func record(eventName, request string) {

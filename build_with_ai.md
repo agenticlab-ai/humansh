@@ -427,7 +427,7 @@ Do not send a directory listing. Detect only a fixed allowlist of commonly usefu
 
 ```text
 awk, brew, curl, docker, fd, find, fzf, gh, git, grep, jq, kubectl,
-lsof, make, node, npm, pnpm, python3, rg, sed, sort, ssh, tar, xargs, yarn
+ls, lsof, make, node, npm, pnpm, python3, rg, sed, sort, ssh, tar, xargs, yarn
 ```
 
 Do not scan every executable in `PATH` or send the full `PATH`.
@@ -1335,7 +1335,7 @@ Rules:
 3. Do not include a shell prompt, Markdown, code fences, commentary, or multiple alternatives in command.
 4. Preserve exact paths, names, branches, identifiers, numbers, ports, and quoted strings from the user's request.
 5. Prefer commands and flags compatible with the stated operating system and target shell.
-6. Prefer an already available standard tool over installing or reimplementing one.
+6. Prefer the simplest conventional command that directly satisfies the request, using an available standard tool; avoid unnecessary flags, pipelines, and verbose equivalents.
 7. Do not use sudo, privilege escalation, package installation, destructive force flags, or recursive deletion unless the user explicitly requested the corresponding effect.
 8. Never use eval, encoded payloads, base64-decoded execution, hidden control characters, or download-and-pipe-to-shell patterns.
 9. Do not assume access to repository contents, files, directory listings, shell history, or environment variables.
