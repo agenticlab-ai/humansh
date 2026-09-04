@@ -153,8 +153,10 @@ func TestClassifyZLEStatusHintIsLocalAndFixed(t *testing.T) {
 		// The translate hint carries the provider label so the widget can show
 		// "Translating with <provider>…" without spawning humansh at shell startup.
 		{"show me files", "unresolved", "translate Codex"},
+		{"list files", "unresolved", "translate Codex"},
+		{"list files", "command", "literal"},
 		{"pwd", "builtin", "literal"},
-		{"gti status", "unresolved", "ambiguous"},
+		{"gti status", "unresolved", "translate Codex"},
 	} {
 		var out, errOut bytes.Buffer
 		code := Run(context.Background(), []string{"classify", "--zle-status", "--first-token-kind", test.kind}, IO{In: strings.NewReader(test.input), Out: &out, Err: &errOut})

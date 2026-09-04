@@ -147,8 +147,8 @@ func TestNormativeExamples(t *testing.T) {
 		{"make-tail", "make it faster", shell.TokenCommand, false, Ambiguous},
 		{"head-tail", "head to the downloads folder", shell.TokenCommand, false, Ambiguous},
 		{"test-tail", "test if the port is open", shell.TokenBuiltin, false, Ambiguous},
-		{"typo", "gti status", shell.TokenUnresolved, false, Ambiguous},
-		{"custom", "foo bar baz", shell.TokenUnresolved, false, Ambiguous},
+		{"typo", "gti status", shell.TokenUnresolved, false, Natural},
+		{"custom", "foo bar baz", shell.TokenUnresolved, false, Natural},
 		{"redirect", "not-a-command > existing-file", shell.TokenUnresolved, false, Literal},
 		{"no-command-exception", "docker ps that were running", shell.TokenCommand, false, Ambiguous},
 	}

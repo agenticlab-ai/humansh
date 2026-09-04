@@ -65,9 +65,10 @@ This is not a sandbox. An executable can ignore `--help`, load plugins or other 
 
 | Code | Weight | Normative trigger/example |
 |---|---:|---|
-| `natural_instruction_prefix` | 5 | Fixed request prefixes such as `show me`, `please`, `help me`, or `list the`. |
+| `natural_instruction_prefix` | 5 | Fixed grammatical request prefixes such as `show me`, `please`, or `help me`. |
 | `natural_question_prefix` | 5 | Fixed question prefixes, or grammatical `which … is/are/uses/using/listening`. |
 | `question_mark` | 3 | Sentence-ending `?` that is not part of a glob. |
+| `unresolved_plain_phrase` | 3 | The active shell definitively reports an unresolved head and the input contains at least two plain alphabetic words with no shell markers. |
 | `ordinary_sentence_structure` | 3 | Four or more ordinary words, an instruction/unresolved head, and no shell markers. |
 | `natural_language_tail` | 4 | An inspectable resolved-command tail has a `grammar-tail-v1` word and no tail shell markers: `find all files modified today` or `git is failing please authenticate`. |
 | `natural_clause` | 3 | A fixed clause such as `modified today`, gated by instruction/unresolved/tail evidence. |
@@ -84,7 +85,9 @@ am are be been being can could did do does had has have is may might must shall 
 about after at before by during for from if in into of on over through to under until with without
 ```
 
-There is no command-name negative list. For an external command with usable help, token roles determine which words remain inspectable. For aliases, functions, builtins, reserved words, unresolved heads, and help that is unavailable or unparseable, the classifier uses the same conservative lexical fallback without hard-coding knowledge of any command. The corpus proves that `all` makes `find all files modified today` ambiguous and `it` makes `make it faster` ambiguous.
+There is no command-name negative list. For an external command with usable help, token roles determine which words remain inspectable. For aliases, functions, builtins, reserved words, unresolved heads, and help that is unavailable or unparseable, the classifier uses the same lexical mechanism without hard-coding knowledge of any command. The corpus proves that `all` makes `find all files modified today` ambiguous and `it` makes `make it faster` ambiguous.
+
+For short plain phrases, active-shell resolution is decisive without being verb-specific. `list files`, `summarize logs`, `gti status`, and any other two-or-more-word alphabetic phrase enter translation when Zsh definitively reports the head as unresolved. A resolved `list files` is literal unless it independently carries strong English evidence. Unknown resolution, single words, and inputs containing shell syntax remain conservative. This intentionally sends likely command typos to translation, where the suggested replacement is inserted for review but never executed automatically. Exact command overrides remain available for commands handled outside normal shell resolution.
 
 ### When a real command's operands look like English
 

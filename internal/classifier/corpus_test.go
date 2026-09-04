@@ -134,7 +134,9 @@ var representativeCorpus = []corpusCase{
 	strongNatural("could-you", "could you find duplicate image files", "natural_instruction_prefix"),
 	strongNatural("want-to", "I want to inspect recent commits", "natural_instruction_prefix"),
 	strongNatural("find-me", "find me the largest log files", "natural_instruction_prefix"),
-	strongNatural("list-the", "list the files changed during this week", "natural_instruction_prefix"),
+	strongNatural("short-list", "list files", "unresolved_plain_phrase"),
+	strongNatural("generic-short-imperative", "summarize logs", "unresolved_plain_phrase"),
+	strongNatural("list-the", "list the files changed during this week", "unresolved_plain_phrase"),
 	strongNatural("how-question", "how do I see listening ports", "natural_question_prefix"),
 	strongNatural("what-is", "what is using port 3000", "natural_question_prefix"),
 	strongNatural("what-are", "what are the largest folders here", "natural_question_prefix"),
@@ -156,6 +158,7 @@ var representativeCorpus = []corpusCase{
 	strongAmbiguous("make-tail", "make it faster", shell.TokenCommand, "natural_language_tail"),
 	strongAmbiguous("head-tail", "head to the downloads folder", shell.TokenCommand, "natural_language_tail"),
 	strongAmbiguous("test-tail", "test if the port is open", shell.TokenBuiltin, "natural_language_tail"),
+	strongLiteral("resolved-list", "list files", shell.TokenCommand, "resolved_first_token"),
 	strongAmbiguous("docker-English-tail", "docker ps that were running", shell.TokenCommand, "natural_language_tail"),
 	withGrammar(strongAmbiguous("structured-unknown-English-subcommand", "fixturevcs is failing please authenticate", shell.TokenCommand, "command_grammar_undocumented_subcommand", "natural_language_tail")),
 	withGrammar(strongAmbiguous("structured-status-English-operands", "fixturevcs status is failing please authenticate", shell.TokenCommand, "command_grammar_recognized", "natural_language_tail")),
@@ -164,11 +167,14 @@ var representativeCorpus = []corpusCase{
 	{name: "structured-unknown-status-option", raw: "fixturevcs status --porcelian", kind: shell.TokenCommand, grammar: true, want: Ambiguous, decision: "command_grammar_uncertain", command: scoreBounds{8, 8}, english: scoreBounds{0, 0}, required: []string{"resolved_first_token", "command_grammar_unknown_option"}},
 	{name: "structured-missing-global-option-value", raw: "fixturevcs -C", kind: shell.TokenCommand, grammar: true, want: Ambiguous, decision: "command_grammar_uncertain", command: scoreBounds{8, 8}, english: scoreBounds{0, 0}, required: []string{"resolved_first_token", "command_grammar_missing_option_value"}},
 
-	// Short unresolved command-like inputs stay uncertain.
-	weakAmbiguous("typo-gti", "gti status"),
-	weakAmbiguous("custom-three", "foo bar baz"),
-	weakAmbiguous("project-task", "deploy staging"),
-	weakAmbiguous("short-unicode", "résumé index"),
+	// Plain multi-word input cannot execute when the active shell definitively
+	// reports its head as unresolved, so it enters translation without a
+	// verb-by-verb allowlist. Translation only replaces the editable buffer for
+	// review; it does not execute the generated command.
+	strongNatural("typo-gti", "gti status", "unresolved_plain_phrase"),
+	strongNatural("custom-three", "foo bar baz", "unresolved_plain_phrase"),
+	strongNatural("project-task", "deploy staging", "unresolved_plain_phrase"),
+	strongNatural("short-unicode", "résumé index", "unresolved_plain_phrase"),
 	weakAmbiguous("unknown-one", "frobnicate"),
 
 	// Real commands whose operands collide with the grammar-tail lexicon. The
