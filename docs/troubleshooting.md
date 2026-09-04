@@ -96,6 +96,8 @@ humansh classifier list
 
 Use `Ctrl-G` to force translation, or press `Ctrl-X` then `Enter` to run the exact text unchanged. If you customize either binding, humansh shows the configured key sequence in its next-step messages. Conflicting overrides are reported by `humansh doctor`.
 
+Short plain-language requests use active-shell resolution rather than a verb allowlist. Any input containing at least two plain words and no shell syntax, such as `list files` or `summarize logs`, should translate when `whence -w` reports that its first word is not found. If the first word resolves as an executable, alias, function, builtin, or reserved word, normal command classification applies. A likely typo such as `gti status` therefore enters translation for review; the generated command is never executed automatically.
+
 ## Provider output
 
 Exit 25 means the provider returned an incomplete/malformed final response; retry or run `humansh provider test`. Exit 26 means local policy rejected content such as controls, Markdown, surrounding prose, or obfuscated execution. In both cases the original buffer and cursor remain unchanged and nothing executes.

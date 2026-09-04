@@ -794,7 +794,7 @@ Hard behavior before scoring:
 5. A matching English-prefix override returns `natural_language` unless a conflicting command override also matches.
 6. Conflicting user overrides return `ambiguous` with reason `conflicting_user_overrides`; `humansh doctor` must identify and explain how to remove one override.
 
-Do not spell-correct an unresolved token before classification. For example, `gti status` may be a typo, a project command unavailable in the current environment, or English-like text. It must remain ambiguous rather than being silently translated or executed.
+Do not spell-correct an unresolved token inside the local classifier. When the active shell definitively reports an unresolved head, a plain multi-word input such as `gti status` enters translation under the same generic rule as `list files`; the provider may suggest a correction, but its result is inserted for review and never executed automatically. An `unknown` resolution result, a single unresolved word, or explicit shell syntax remains conservative.
 
 ### 7.3 Result and evidence model
 
@@ -974,9 +974,10 @@ Use the following initial weights. Apply each reason at most once:
 
 | Stable reason code | Evidence | Weight |
 |---|---|---:|
-| `natural_instruction_prefix` | Begins with an explicit request such as `show me`, `tell me`, `please`, `help me`, `can you`, `could you`, `I want to`, `find me`, or `list the`. | +5 |
+| `natural_instruction_prefix` | Begins with an explicit grammatical request such as `show me`, `tell me`, `please`, `help me`, `can you`, `could you`, `I want to`, or `find me`. | +5 |
 | `natural_question_prefix` | Begins with a genuine question such as `how do I`, `what is`, `what are`, `where is`, or a grammatical `which ... is/are/uses` clause. | +5 |
 | `question_mark` | Ends with a sentence-style question mark and has no stronger shell-punctuation pattern. | +3 |
+| `unresolved_plain_phrase` | The active shell definitively reports an unresolved head and the input contains at least two plain alphabetic words with no flags, paths, assignments, operators, substitutions, globs, or `=` tokens. | +3 |
 | `ordinary_sentence_structure` | Begins as an explicit English request or has an unresolved first token, then contains at least four ordinary words with sentence-like order and no flags, paths, assignments, or shell operators. | +3 |
 | `natural_language_tail` | A resolved command has an inspectable tail with at least two ordinary words, at least one of which is in the versioned grammar lexicon below, and no tail shell markers. With usable installed help, inspect only positional/unexpected grammar roles; otherwise use the conservative lexical fallback. A single identifier such as `which git` does not match. | +4 |
 | `natural_clause` | After an explicit English prefix, an unresolved first token, or an actual `natural_language_tail` match, contains a clause such as `is using`, `that were`, `in this folder`, `from the last`, `modified today`, `changed during`, or `by size`. For a resolved command head, a merely grammar-bearing tail is insufficient: `natural_language_tail` must have fired. | +3 |
@@ -1010,7 +1011,7 @@ Important details:
   The classifier corpus is the executable test of this list. In particular, `all` makes `find all files modified today` eligible and `it` makes `make it faster` eligible. Changing an entry requires a classifier version decision, fixtures for both positive and command-operand cases, and release notes.
 
 - A resolved first word is not enough to defeat a grammar-bearing English tail. Use the same grammatical rule for `find`, `open`, `watch`, `top`, `who`, `make`, `head`, `test`, and any other resolved command word. `which git` is literal; `which process is using port 3000` is ambiguous.
-- `unresolved_first_token` is intentionally weak. It must not turn `gti status` or `foo bar baz` into natural language by itself.
+- `unresolved_first_token` is intentionally weak by itself. A definitively unresolved, plain multi-word input also receives `unresolved_plain_phrase`, so `list files`, `gti status`, and `foo bar baz` enter translation without a command-name or verb list. `unknown` resolution does not receive that structural evidence.
 - Do not maintain a command-name negative list or any command-specific exception in production. For external commands with usable help, roles decide which words are inspectable; aliases, functions, builtins, reserved words, unresolved heads, and unavailable/unparseable help use the same conservative lexical fallback.
 - English structural rules must not fire on arbitrary quoted payloads after a resolved command.
 - Keep the grammar lexicon small, explicit, versioned, and test-backed. Do not add a probabilistic NLP library or remote classifier in the MVP.
@@ -1081,6 +1082,8 @@ These are normative examples for the initial implementation:
 | `open README.md` | command | literal | Resolved macOS command and path-like argument. |
 | `find . -type f -mtime -1` | command | literal | Resolved command and flags or path syntax. |
 | `show me the largest files in this folder` | unresolved | natural_language | Explicit instruction prefix and sentence structure. |
+| `list files` | unresolved | natural_language | Generic unresolved-plain-phrase evidence; there is no `list`-specific rule. |
+| `list files` | command | literal | A real command named `list` supplies command evidence and the short operand has no independent English structure. |
 | `how do I see what is listening on port 3000` | unresolved | natural_language | Explicit question grammar. |
 | `list all files changed during the last two days` | unresolved | natural_language | Unresolved first word plus strong sentence and clause evidence. |
 | `find all files modified today` | command | ambiguous | Real `find` command plus strong English tail. |
@@ -1095,8 +1098,8 @@ These are normative examples for the initial implementation:
 | `make it faster` | command | ambiguous | Resolved command plus a pronoun and adjective phrase. |
 | `head to the downloads folder` | command | ambiguous | Resolved command plus a natural prepositional phrase. |
 | `test if the port is open` | builtin or command | ambiguous | Resolved command plus a natural conditional clause. |
-| `gti status` | unresolved | ambiguous | Possible typo or unavailable command; insufficient English evidence. |
-| `foo bar baz` | unresolved | ambiguous | Could be a custom command; not enough sentence evidence. |
+| `gti status` | unresolved | natural_language | Generic unresolved-plain-phrase evidence; a provider may suggest the intended command for review. |
+| `foo bar baz` | unresolved | natural_language | Generic unresolved-plain-phrase evidence; use an exact command override for out-of-band command dispatch. |
 | `not-a-command > existing-file` | unresolved | literal | Explicit redirection must retain normal shell semantics. |
 
 The corpus, not undocumented intuition, defines behavior. Changes to a normative example require an intentional test update and release-note entry.
@@ -2533,6 +2536,8 @@ which git                                       → literal
 open README.md                                  → literal
 not-a-command > existing-file                   → literal
 show me files changed today                     → natural_language
+list files                                      → natural_language
+summarize logs                                  → natural_language
 how do I see what is listening on port 3000     → natural_language
 list all files changed during the last two days → natural_language
 which process is listening on port 3000         → ambiguous
@@ -2552,8 +2557,8 @@ git status is failing please authenticate       → ambiguous
 fixturevcs statsu  # exhaustive fake help       → ambiguous
 git status --porcelian                          → ambiguous
 git -C                                          → ambiguous
-gti status                                      → ambiguous
-foo bar baz                                     → ambiguous
+gti status                                      → natural_language
+foo bar baz                                     → natural_language
 rm -rf build                                    → literal
 ```
 
@@ -2765,24 +2770,25 @@ Required scenarios:
 6. `Ctrl-X`, then `Enter` executes the reviewed high-risk command.
 7. `Ctrl-G` forces translation of ambiguous input.
 8. Ambiguous smart input remains unchanged and makes no provider call.
-9. `which process is using port 3000`, `open the project folder`, and `gti status` remain ambiguous.
-10. `echo show me the files` remains ambiguous without a command-name exception, while `which git` delegates as a literal command.
-11. A configured command override is literal, and a configured English-prefix override is translated.
-12. Provider auth error leaves buffer/cursor unchanged, no stderr bytes leak directly into the terminal, and the repair command is displayed through `zle -M` without corrupting redisplay.
-13. A fake provider blocks for at least two seconds; the PTY observes at least two distinct loader frames beside `Translating with <provider>…` before completion, proving that `zle -M` and `zle -R` refresh throughout the call.
-14. Ctrl-C cancels translation and restores editing.
-15. `emacs`, `viins`, and `vicmd` keymaps work; entering `vicmd` through a non-Escape widget cannot bypass humansh, while default Escape clears the line.
-16. Prior custom Enter widget is called for execution in each keymap.
-17. `humansh-off` restores previous bindings.
-18. Reloading the plugin does not create recursion or duplicate state.
-19. Deleting or making the humansh binary unexecutable mid-session causes a one-time warning and delegates Enter to the original widget; a literal `git status` still runs.
-20. An unlisted exit code from a binary that did run fails closed and preserves the buffer/cursor.
-21. Exit `15` shows unsupported-request guidance and preserves the original request.
-22. Every successful replacement puts the cursor at the end, including multibyte buffers.
-23. Editing a generated high-risk command by appending one space does not clear the gate; editing any generated command into a high-risk form activates it; changing it to low/medium risk permits the specified flow.
-24. Custom exported clear-line, force-translate, and force-literal bindings are honored in all supported keymaps, while absent exports use `^[`, `^G`, and `^X^M` defaults. Pressing the default Escape clears ordinary input and safely cancels a pending generated command without executing it.
-25. `HUMANSH_SMART_ENTER=0` leaves prior Enter bindings untouched; changing it to `1` through a re-rendered managed block enables smart Enter without modifying the embedded asset.
-26. A fake final `ok` response with an empty command returns exit `25` and neutral incomplete-response guidance; a control-character or obfuscation rejection returns exit `26` and policy guidance. Both preserve buffer/cursor and execute nothing.
+9. Unresolved plain phrases such as `list files`, `summarize logs`, and `gti status` translate immediately without verb-specific rules, while a resolved command named `list` executes literally.
+10. `which process is using port 3000` and `open the project folder` remain ambiguous because their first words resolve as real commands while their tails look like English.
+11. `echo show me the files` remains ambiguous without a command-name exception, while `which git` delegates as a literal command.
+12. A configured command override is literal, and a configured English-prefix override is translated.
+13. Provider auth error leaves buffer/cursor unchanged, no stderr bytes leak directly into the terminal, and the repair command is displayed through `zle -M` without corrupting redisplay.
+14. A fake provider blocks for at least two seconds; the PTY observes at least two distinct loader frames beside `Translating with <provider>…` before completion, proving that `zle -M` and `zle -R` refresh throughout the call.
+15. Ctrl-C cancels translation and restores editing.
+16. `emacs`, `viins`, and `vicmd` keymaps work; entering `vicmd` through a non-Escape widget cannot bypass humansh, while default Escape clears the line.
+17. Prior custom Enter widget is called for execution in each keymap.
+18. `humansh-off` restores previous bindings.
+19. Reloading the plugin does not create recursion or duplicate state.
+20. Deleting or making the humansh binary unexecutable mid-session causes a one-time warning and delegates Enter to the original widget; a literal `git status` still runs.
+21. An unlisted exit code from a binary that did run fails closed and preserves the buffer/cursor.
+22. Exit `15` shows unsupported-request guidance and preserves the original request.
+23. Every successful replacement puts the cursor at the end, including multibyte buffers.
+24. Editing a generated high-risk command by appending one space does not clear the gate; editing any generated command into a high-risk form activates it; changing it to low/medium risk permits the specified flow.
+25. Custom exported clear-line, force-translate, and force-literal bindings are honored in all supported keymaps, while absent exports use `^[`, `^G`, and `^X^M` defaults. Pressing the default Escape clears ordinary input and safely cancels a pending generated command without executing it.
+26. `HUMANSH_SMART_ENTER=0` leaves prior Enter bindings untouched; changing it to `1` through a re-rendered managed block enables smart Enter without modifying the embedded asset.
+27. A fake final `ok` response with an empty command returns exit `25` and neutral incomplete-response guidance; a control-character or obfuscation rejection returns exit `26` and policy guidance. Both preserve buffer/cursor and execute nothing.
 
 All commands in tests must operate inside a temporary directory.
 
@@ -3025,10 +3031,11 @@ open the project folder
 watch the logs
 who is using port 80
 make it faster
-gti status
 ```
 
 Each input remains unchanged and produces no provider call.
+
+Type `gti status` separately. Because `gti` is unresolved and the line is a plain multi-word phrase, translation starts and any suggested correction is inserted for review without being executed.
 
 ### Scenario D2: explainable classifier decision
 

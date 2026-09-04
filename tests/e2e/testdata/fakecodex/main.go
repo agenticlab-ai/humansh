@@ -13,6 +13,7 @@ import (
 const (
 	probePrompt             = "Reply with exactly HUMANSH_READY and nothing else. Do not use tools or inspect external state."
 	listRequest             = "list all the files in this directory"
+	shortListRequest        = "list files"
 	ambiguousRMRequest      = "rm is not working"
 	findContentRequest      = `find the file with "ABC" content`
 	createMarkerRequest     = "please create a marker file for me"
@@ -121,6 +122,7 @@ func fixtureResponse(request string) (response, bool) {
 		explanation string
 	}{
 		{listRequest, "ls -la", "Lists every entry in the current directory."},
+		{shortListRequest, "ls -la", "Lists every entry in the current directory."},
 		{ambiguousRMRequest, "man rm", "Opens the manual for rm so its expected arguments can be checked."},
 		{findContentRequest, "grep -R -- 'ABC' .", "Finds files below the current directory that contain ABC."},
 		{createMarkerRequest, "touch humansh-e2e-generated-marker", "Creates the requested marker file."},

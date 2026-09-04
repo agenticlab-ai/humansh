@@ -111,6 +111,8 @@ humansh classifies **intent**, not syntax — `find all files modified today` pa
 | `natural_language` | Translated, validated, risk-scored, inserted for review. |
 | `ambiguous` | **Left untouched.** No provider call. Use `Ctrl-G` or `Ctrl-X Enter` to decide. |
 
+Resolution is the general boundary for short plain-language input. If a line contains two or more plain words, no shell syntax, and its first word does not resolve in the active Zsh, Humansh starts translation; this covers `list files`, `summarize logs`, and future verbs without adding word-specific rules. If the first word resolves as a command, alias, function, builtin, or reserved word, normal command classification applies instead. Translation only replaces the editable buffer for review and never executes the generated command.
+
 Scoring is local and inspectable — never an LLM:
 
 ```sh

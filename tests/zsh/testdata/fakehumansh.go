@@ -40,11 +40,11 @@ func main() {
 	}
 	if mode == "classify" {
 		switch input {
-		case "show me files", "move a file", "delete build", "configured English prefix files", "auth please", "unsupported please", "incomplete please", "policy please", "unicode please", "slow please", "split streams please", "empty success please", "parent cd", "parent export", "unknown result":
+		case "show me files", "move a file", "delete build", "configured English prefix files", "auth please", "unsupported please", "incomplete please", "policy please", "unicode please", "slow please", "split streams please", "empty success please", "parent cd", "parent export", "unknown result", "gti status":
 			// The real binary appends the provider label so the widget can render
 			// its pre-blocking status without a shell-startup lookup.
 			fmt.Print("translate Codex")
-		case "ambiguous words", "echo show me the files", "which process is using port 3000", "open the project folder", "gti status":
+		case "ambiguous words", "echo show me the files", "which process is using port 3000", "open the project folder":
 			fmt.Print("ambiguous")
 		default:
 			fmt.Print("literal")
@@ -69,6 +69,9 @@ func main() {
 	case "show me files":
 		fmt.Print("print -r -- GENERATED_LOW")
 		os.Exit(10)
+	case "gti status":
+		fmt.Print("git status")
+		os.Exit(10)
 	case "move a file":
 		fmt.Print("mv old new")
 		os.Exit(13)
@@ -78,7 +81,7 @@ func main() {
 	case "ambiguous words":
 		fmt.Fprint(os.Stderr, "Not sure whether this is English or a command. Next: press Ctrl-G to translate it, or press Ctrl-X then Enter to run it unchanged.")
 		os.Exit(11)
-	case "echo show me the files", "which process is using port 3000", "open the project folder", "gti status":
+	case "echo show me the files", "which process is using port 3000", "open the project folder":
 		fmt.Fprint(os.Stderr, "Not sure whether this is English or a command. Next: press Ctrl-G to translate it, or press Ctrl-X then Enter to run it unchanged.")
 		os.Exit(11)
 	case "configured English prefix files":

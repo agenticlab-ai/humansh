@@ -73,7 +73,7 @@ var (
 )
 
 var instructionPrefixes = []string{
-	"show me", "tell me", "please", "help me", "can you", "could you", "i want to", "find me", "list the",
+	"show me", "tell me", "please", "help me", "can you", "could you", "i want to", "find me",
 }
 
 var questionPrefixes = []string{"how do i", "what is", "what are", "where is"}
@@ -192,6 +192,10 @@ func (c Classifier) ClassifyContext(ctx context.Context, in Input) Result {
 		add(&englishEvidence, EnglishEvidence, "question_mark", 3, "ends with sentence punctuation")
 	}
 	noShellMarkers := !scan.shellOperator && !scan.flag && !scan.pathArgument && !scan.assignmentPrefix && !scan.commandSubstitution && !scan.parameterExpansion && !scan.glob && !scan.containsEquals
+	plainUnresolvedPhrase := in.FirstTokenKind == shell.TokenUnresolved && len(scan.tokens) >= 2 && len(words) == len(scan.tokens) && noShellMarkers
+	if plainUnresolvedPhrase {
+		add(&englishEvidence, EnglishEvidence, "unresolved_plain_phrase", 3, "unresolved input contains multiple plain words and no shell syntax")
+	}
 	ordinaryStructure := (instruction || in.FirstTokenKind == shell.TokenUnresolved || in.FirstTokenKind == shell.TokenUnknown) && len(words) >= 4 && noShellMarkers
 	if ordinaryStructure {
 		add(&englishEvidence, EnglishEvidence, "ordinary_sentence_structure", 3, "contains at least four ordinary words in sentence order")
@@ -220,7 +224,7 @@ func (c Classifier) ClassifyContext(ctx context.Context, in Input) Result {
 	if in.FirstTokenKind == shell.TokenUnresolved || in.FirstTokenKind == shell.TokenUnknown {
 		add(&englishEvidence, EnglishEvidence, "unresolved_first_token", 2, "first token is unresolved in the active shell")
 	}
-	structural := instruction || question || ordinaryStructure || tail || clause
+	structural := instruction || question || plainUnresolvedPhrase || ordinaryStructure || tail || clause
 	ordinaryTail := []token(nil)
 	if len(scan.tokens) > 1 {
 		ordinaryTail = scan.tokens[1:]
