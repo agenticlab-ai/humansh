@@ -103,19 +103,37 @@ func (session *runtimeHelpSession) Load(ctx context.Context, prefix []string) He
 			return HelpResult{Status: HelpUnavailable}
 		}
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, session.timeout)
-	defer cancel()
 	args := append(append(make([]string, 0, len(prefix)+1), prefix...), "--help")
-	result, runErr := session.runner.Run(probeCtx, processrunner.Spec{
+	spec := processrunner.Spec{
 		Path:      session.path,
 		Args:      args,
 		Dir:       session.tempDir,
 		Env:       session.env,
 		MaxStdout: session.maxOutput,
 		MaxStderr: session.maxOutput,
-	})
-	if probeCtx.Err() != nil || ctx.Err() != nil {
-		return HelpResult{Status: HelpUnavailable}
+	}
+	var result processrunner.Result
+	var runErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		timeout := session.timeout
+		if attempt == 1 {
+			// A cold executable may miss the short first deadline. Spend the
+			// remaining analysis budget on one retry of the same fixed probe.
+			timeout *= 2
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, timeout)
+		result, runErr = session.runner.Run(probeCtx, spec)
+		timedOut := errors.Is(probeCtx.Err(), context.DeadlineExceeded)
+		cancel()
+		if ctx.Err() != nil {
+			return HelpResult{Status: HelpUnavailable}
+		}
+		if !timedOut {
+			break
+		}
+		if attempt == 1 {
+			return HelpResult{Status: HelpUnavailable}
+		}
 	}
 	complete := !processrunner.IsOutputLimit(runErr)
 	if runErr != nil && !complete && len(result.Stdout) == 0 && len(result.Stderr) == 0 {

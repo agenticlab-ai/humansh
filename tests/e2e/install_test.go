@@ -205,6 +205,17 @@ dump_buffer "$HUMANSH_E2E_COMMAND" || exit 155
 		})
 	}
 
+	t.Run("transiently slow help still rejects conflicting synopsis typo", func(t *testing.T) {
+		const input = "slowtool inspect readme --typo"
+		fixture.runZshScenario(t, `
+zpty -w -n H "$HUMANSH_E2E_COMMAND"$'\r'
+wait_for 'Not sure whether this is English or a command' 'HUMANSH_E2E_UNEXPECTED_EXECUTION' || exit 160
+dump_buffer "$HUMANSH_E2E_COMMAND" || exit 161
+`, "HUMANSH_E2E_COMMAND", input)
+		fixture.requireCommandCalls(t, "slowtool", [][]string{{"--help"}, {"--help"}})
+		fixture.requireProviderEvents(t, "", nil)
+	})
+
 	t.Run("natural language is translated for review and Escape clears it", func(t *testing.T) {
 		fixture.runZshScenario(t, `
 zpty -w -n H "$HUMANSH_E2E_REQUEST"$'\r'
@@ -456,8 +467,10 @@ func installZshFixture(t *testing.T) *installedFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(providerBin, "tool"), fixtureData, 0o700); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"tool", "slowtool"} {
+		if err := os.WriteFile(filepath.Join(providerBin, name), fixtureData, 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	env := isolatedEnvironment(t, home, providerBin)
@@ -552,7 +565,7 @@ func (fixture *installedFixture) runZshScenario(t *testing.T, body string, varia
 	if err := os.WriteFile(fixture.callLog, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"docker", "tool"} {
+	for _, name := range []string{"docker", "tool", "slowtool"} {
 		if err := os.WriteFile(filepath.Join(fixture.providerBin, name+".calls.jsonl"), nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
