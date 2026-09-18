@@ -170,6 +170,54 @@ Options:
 	}
 }
 
+func TestHelpAnalyzerForwardsOnlyAfterEnvironmentAssignments(t *testing.T) {
+	t.Parallel()
+	for _, help := range []string{
+		"usage: env [-0iv] [-C workdir] [-P utilpath] [-S string]\n           [-u name] [name=value ...] [utility [argument ...]]",
+		"Usage: /usr/bin/env [OPTION]... [-] [NAME=VALUE]... [COMMAND [ARG]...]",
+	} {
+		node, err := ParseHelp([]byte(help), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, test := range []struct {
+			input    string
+			stop     StopReason
+			boundary int
+		}{
+			{"env GOPATH=/tmp/go BACKEND=cursor /tmp/go/bin/dlv dap --log=true", StopComplete, 3},
+			{"env --bogus GOPATH=/tmp/go /tmp/go/bin/dlv dap", StopUnknownOption, 1},
+			{"env GOPATH=/tmp/go --bogus /tmp/go/bin/dlv dap", StopUnknownOption, 2},
+			{"env $SETTINGS --bogus /tmp/go/bin/dlv dap", StopDynamicShellWord, 1},
+			{`env "GOPATH=/tmp/go" --bogus /tmp/go/bin/dlv dap`, StopDynamicShellWord, 1},
+		} {
+			t.Run(help+test.input, func(t *testing.T) {
+				session := &fakeHelpSession{nodes: map[string]HelpResult{"": {Node: node, Status: HelpOK}}}
+				analysis := NewAnalyzer(&fakeHelpSource{session: session}).Analyze(context.Background(), invocation(test.input))
+				if analysis.StopReason != test.stop || analysis.Boundary != test.boundary {
+					t.Fatalf("analysis=%+v annotations=%+v", analysis, analysis.Annotations)
+				}
+				if test.stop == StopComplete && (analysis.Coverage != CoveragePartial || analysis.Uncertain()) {
+					t.Fatalf("forwarded utility should remain partial without a structural veto: %+v", analysis)
+				}
+				if test.stop == StopComplete {
+					for _, index := range []int{1, 2} {
+						if analysis.RoleAt(index) != RoleAssignment {
+							t.Fatalf("word %d should be an assignment: %+v", index, analysis.Annotations)
+						}
+					}
+					if analysis.RoleAt(3) != RoleForwardedHead || analysis.RoleAt(4) != RoleForwarded || analysis.RoleAt(5) != RoleForwarded {
+						t.Fatalf("utility and arguments were not separated: %+v", analysis.Annotations)
+					}
+				}
+				if len(session.calls) != 1 || session.calls[0] != "" {
+					t.Fatalf("invocation operands reached a help probe: %v", session.calls)
+				}
+			})
+		}
+	}
+}
+
 func TestTraversalNeverProbesAnUndocumentedWord(t *testing.T) {
 	t.Parallel()
 	source := fixtureHelpSource()

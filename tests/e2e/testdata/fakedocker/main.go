@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -20,19 +21,23 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	prior, err := log.Stat()
+	if err != nil {
+		panic(err)
+	}
 	if err := json.NewEncoder(log).Encode(os.Args[1:]); err != nil {
 		panic(err)
 	}
 	if err := log.Close(); err != nil {
 		panic(err)
 	}
-	if filepath.Base(path) == "tool" && strings.Join(os.Args[1:], "\x00") == "--help" {
-		fmt.Println(`Usage:
-  tool inspect FILE
-  tool [OPTIONS] TARGET COMMAND [ARG...]
-
-Options:
-  --help  Print usage`)
+	name := filepath.Base(path)
+	if (name == "tool" || name == "slowtool") && strings.Join(os.Args[1:], "\x00") == "--help" {
+		if name == "slowtool" && prior.Size() == 0 {
+			// Model a transiently slow first help probe in the installed shell.
+			time.Sleep(450 * time.Millisecond)
+		}
+		fmt.Printf("Usage:\n  %s inspect FILE\n  %s [OPTIONS] TARGET COMMAND [ARG...]\n\nOptions:\n  --help  Print usage\n", name, name)
 		return
 	}
 

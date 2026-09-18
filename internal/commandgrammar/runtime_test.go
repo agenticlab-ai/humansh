@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/agenticlab-ai/humansh/internal/processrunner"
 )
 
 var (
@@ -182,6 +184,33 @@ func TestRuntimeHelpSourceTimesOutAndFallsBack(t *testing.T) {
 	analysis := testRuntimeAnalyzer(RuntimeHelpSource{Timeout: 60 * time.Millisecond}).Analyze(context.Background(), inv)
 	if analysis.Modeled() || time.Since(started) > time.Second {
 		t.Fatalf("timeout analysis=%+v elapsed=%s", analysis, time.Since(started))
+	}
+}
+
+type firstProbeTimeoutRunner struct {
+	calls [][]string
+}
+
+func (runner *firstProbeTimeoutRunner) Run(ctx context.Context, spec processrunner.Spec) (processrunner.Result, error) {
+	runner.calls = append(runner.calls, append([]string(nil), spec.Args...))
+	if len(runner.calls) == 1 {
+		<-ctx.Done()
+		return processrunner.Result{}, ctx.Err()
+	}
+	return processrunner.Result{Stdout: []byte("Usage: fixturevcs inspect FILE\n       fixturevcs [OPTIONS] TARGET COMMAND [ARG...]\n\nOptions:\n  --help  Print usage\n")}, nil
+}
+
+func TestRuntimeHelpSourceRetriesOnlyTimedOutHelpProbe(t *testing.T) {
+	path := buildHelpFixture(t, "fixturevcs")
+	runner := &firstProbeTimeoutRunner{}
+	inv := invocation("fixturevcs inspect readme --typo")
+	inv.ExecutablePath = path
+	analysis := testRuntimeAnalyzer(RuntimeHelpSource{Runner: runner, Timeout: 10 * time.Millisecond}).Analyze(context.Background(), inv)
+	if !analysis.Uncertain() || analysis.StopReason != StopUnknownOption {
+		t.Fatalf("retried help did not reject typo: %+v", analysis)
+	}
+	if len(runner.calls) != 2 || strings.Join(runner.calls[0], " ") != "--help" || strings.Join(runner.calls[1], " ") != "--help" {
+		t.Fatalf("help probes=%v, want two fixed --help calls", runner.calls)
 	}
 }
 

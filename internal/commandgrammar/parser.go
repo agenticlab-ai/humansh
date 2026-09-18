@@ -12,14 +12,16 @@ import (
 const maxHelpParseBytes = 256 << 10
 
 var (
-	ansiCSI       = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
-	ansiOSC       = regexp.MustCompile(`\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
-	optionNameRE  = regexp.MustCompile(`--?[A-Za-z0-9][A-Za-z0-9_-]*`)
-	negatedOptRE  = regexp.MustCompile(`--\[no-\]([A-Za-z0-9][A-Za-z0-9_-]*)`)
-	commandRowRE  = regexp.MustCompile(`^\s{2,}([A-Za-z0-9][A-Za-z0-9._+-]*(?:\s*,\s*[A-Za-z0-9][A-Za-z0-9._+-]*)*)\s{2,}\S`)
-	braceChoiceRE = regexp.MustCompile(`\{([A-Za-z0-9._+-]+(?:\s*,\s*[A-Za-z0-9._+-]+)+)\}`)
-	commandMetaRE = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])(?:SUB)?COMMANDS?(?:$|[^A-Za-z0-9_])`)
-	optionTypeRE  = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	ansiCSI                   = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+	ansiOSC                   = regexp.MustCompile(`\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
+	optionNameRE              = regexp.MustCompile(`--?[A-Za-z0-9][A-Za-z0-9_-]*`)
+	negatedOptRE              = regexp.MustCompile(`--\[no-\]([A-Za-z0-9][A-Za-z0-9_-]*)`)
+	commandRowRE              = regexp.MustCompile(`^\s{2,}([A-Za-z0-9][A-Za-z0-9._+-]*(?:\s*,\s*[A-Za-z0-9][A-Za-z0-9._+-]*)*)\s{2,}\S`)
+	braceChoiceRE             = regexp.MustCompile(`\{([A-Za-z0-9._+-]+(?:\s*,\s*[A-Za-z0-9._+-]+)+)\}`)
+	commandMetaRE             = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])(?:SUB)?COMMANDS?(?:$|[^A-Za-z0-9_])`)
+	optionTypeRE              = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	assignmentForwardTailRE   = regexp.MustCompile(`(?i) (?:\[name=value \.\.\.\] \[(?:utility|command) \[(?:arg|args|argument|arguments) \.\.\.\]\]|\[name=value\]\.\.\. \[(?:utility|command) \[(?:arg|args|argument|arguments)\]\.\.\.\])$`)
+	assignmentForwardPrefixRE = regexp.MustCompile(`^\S+(?: \[(?:-[^\]]*|OPTION)\](?:\.\.\.)?)*$`)
 )
 
 var metavarWords = map[string]struct{}{
@@ -200,11 +202,26 @@ func ParseHelp(data []byte, complete bool) (NodeSpec, error) {
 	}
 	if complete && len(node.Subcommands) == 0 && len(usageForms) == 1 {
 		node.ForwardsCommand = hasForwardedCommandTail(usageForms[0])
+		node.ForwardsAfterAssignments = hasForwardedAssignmentTail(usageForms[0])
 	}
 	if !sawStructure || len(node.Options) == 0 && len(node.Subcommands) == 0 && !sawUsage {
 		return NodeSpec{}, errors.New("no supported help structure found")
 	}
 	return node, nil
+}
+
+// hasForwardedAssignmentTail accepts the BSD and GNU env-style synopses only
+// when one complete form shows options, assignments, and a nested utility tail.
+func hasForwardedAssignmentTail(lines []string) bool {
+	synopsis := strings.Join(lines, " ")
+	if strings.HasPrefix(strings.ToLower(synopsis), "usage:") {
+		synopsis = strings.TrimSpace(synopsis[len("usage:"):])
+	}
+	match := assignmentForwardTailRE.FindStringIndex(synopsis)
+	if match == nil || match[1] != len(synopsis) {
+		return false
+	}
+	return assignmentForwardPrefixRE.MatchString(strings.TrimSpace(synopsis[:match[0]]))
 }
 
 // hasForwardedCommandTail recognizes a bounded synopsis such as
