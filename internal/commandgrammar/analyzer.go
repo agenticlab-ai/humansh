@@ -2,9 +2,12 @@ package commandgrammar
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"time"
 )
+
+var assignmentOperandRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 
 const (
 	defaultMaxHelpDepth  = 4
@@ -159,6 +162,10 @@ func consumeLeadingOptions(words []Word, index int, node NodeSpec, analysis *Ana
 		if word.Text == "--" {
 			analysis.Annotations[index].Role = RoleOption
 			index++
+			if node.ForwardsAfterAssignments {
+				*analysis = consumeAssignmentForwarding(words, index, *analysis)
+				return index, false, true
+			}
 			if node.ForwardsCommand {
 				*analysis = forwardTail(*analysis, index)
 				return index, false, true
@@ -168,6 +175,10 @@ func consumeLeadingOptions(words []Word, index int, node NodeSpec, analysis *Ana
 		}
 		next, terminal, ok := consumeOption(words, index, node, analysis)
 		if !ok {
+			if node.ForwardsAfterAssignments {
+				*analysis = stopAt(*analysis, index, CoverageIndeterminate, StopUnknownOption)
+				return index, false, true
+			}
 			if !node.OptionsKnown || !node.Complete {
 				analysis.Annotations[index].Role = RoleOption
 				markRemainder(analysis, index+1, RolePositional)
@@ -191,6 +202,9 @@ func consumeLeadingOptions(words []Word, index int, node NodeSpec, analysis *Ana
 }
 
 func consumeLeaf(words []Word, index int, node NodeSpec, analysis Analysis) Analysis {
+	if node.ForwardsAfterAssignments {
+		return consumeAssignmentForwarding(words, index, analysis)
+	}
 	if node.SubcommandState == SubcommandsUnknown || !node.Complete {
 		analysis.Coverage = CoveragePartial
 	}
@@ -232,6 +246,27 @@ func consumeLeaf(words []Word, index int, node NodeSpec, analysis Analysis) Anal
 		}
 		analysis.Annotations[index].Role = RolePositional
 		index++
+	}
+	return finish(analysis, index)
+}
+
+func consumeAssignmentForwarding(words []Word, index int, analysis Analysis) Analysis {
+	for index < len(words) {
+		word := words[index]
+		if !word.Static || word.Quoted || strings.ContainsAny(word.Text, "*?[]{}~") {
+			return stopAt(analysis, index, CoverageIndeterminate, StopDynamicShellWord)
+		}
+		if assignmentOperandRE.MatchString(word.Text) {
+			analysis.Annotations[index].Role = RoleAssignment
+			index++
+			continue
+		}
+		if looksLikeOption(word) {
+			return stopAt(analysis, index, CoverageIndeterminate, StopUnknownOption)
+		}
+		forwarded := forwardTail(analysis, index)
+		forwarded.Annotations[index].Role = RoleForwardedHead
+		return forwarded
 	}
 	return finish(analysis, index)
 }

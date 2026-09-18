@@ -56,7 +56,11 @@ const (
 	RoleOption      Role = "option"
 	RoleOptionValue Role = "option_value"
 	RolePositional  Role = "positional"
+	RoleAssignment  Role = "assignment"
 	RoleUnexpected  Role = "unexpected"
+	// The utility word establishes where env-style forwarding begins. Its
+	// path is command syntax, while its arguments remain inspectable.
+	RoleForwardedHead Role = "forwarded_head"
 	// Forwarded words have not been validated against a command's help. Their
 	// non-flag words must remain inspectable even alongside forwarded flags.
 	RoleForwarded Role = "forwarded"
@@ -139,7 +143,10 @@ type NodeSpec struct {
 	// and a trailing COMMAND [ARG...]. The operand tail is outside this node's
 	// option grammar and must remain inspectable, never a recursive help probe.
 	ForwardsCommand bool
-	Complete        bool
+	// ForwardsAfterAssignments marks a single synopsis with leading options,
+	// zero or more name=value operands, then a utility and its arguments.
+	ForwardsAfterAssignments bool
+	Complete                 bool
 }
 
 // ExecutableRef names the statically decoded command and, when supplied by a

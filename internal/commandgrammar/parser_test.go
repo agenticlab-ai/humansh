@@ -255,6 +255,32 @@ func TestParseHelpRecognizesOnlyBoundedForwardedCommandTails(t *testing.T) {
 	}
 }
 
+func TestParseHelpRecognizesOnlyCompleteAssignmentForwardingSynopses(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, help string
+		complete   bool
+		want       bool
+	}{
+		{"bsd-env", "usage: env [-0iv] [-C workdir] [-P utilpath] [-S string]\n           [-u name] [name=value ...] [utility [argument ...]]", true, true},
+		{"gnu-env", "Usage: /usr/bin/env [OPTION]... [-] [NAME=VALUE]... [COMMAND [ARG]...]", true, true},
+		{"missing-assignment-segment", "Usage: env [OPTION]... [COMMAND [ARG]...]", true, false},
+		{"interposed-operand", "Usage: env [OPTION]... TARGET [NAME=VALUE]... [COMMAND [ARG]...]", true, false},
+		{"conflicting-synopses", "Usage: env [OPTION]... [NAME=VALUE]... [COMMAND [ARG]...]\nUsage: env FILE", true, false},
+		{"truncated-help", "Usage: env [OPTION]... [NAME=VALUE]... [COMMAND [ARG]...]", false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			node, err := ParseHelp([]byte(test.help), test.complete)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if node.ForwardsAfterAssignments != test.want {
+				t.Fatalf("ForwardsAfterAssignments=%t, want %t", node.ForwardsAfterAssignments, test.want)
+			}
+		})
+	}
+}
+
 func TestParseHelpKeepsCustomOptionTypesSeparateFromProse(t *testing.T) {
 	t.Parallel()
 	node, err := ParseHelp([]byte(`Usage: box [OPTIONS] FILE
