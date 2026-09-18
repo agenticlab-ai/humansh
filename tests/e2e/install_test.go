@@ -34,6 +34,7 @@ const (
 	zellijExecutedOutput    = "HUMANSH_E2E_ZELLIJ_EXECUTED:<attach|-c|pyxis-codex|--|codex>"
 	goCoverCommand          = "go test -cover"
 	goHelpTestCommand       = "go help test"
+	reportedEnvCommand      = "/usr/bin/env GOPATH=/Users/majid/go PYXIS_AGENT_BACKEND=cursor /Users/majid/go/bin/dlv dap --log=true --log-output=debugger --client-addr=:59908"
 	dockerRunCommand        = "docker run --rm --network host docker.io/library/node@sha256:6dac556d980b7f0e5498d08f08cee0ca67798b4ad6c23964a9214920e67758d0 curl --silent --show-error --fail --max-time 8 http://127.0.0.1:3000/api/v1/version"
 	privateEnvironmentValue = "HUMANSH_E2E_ENV_SECRET_DO_NOT_SEND"
 	privateFileValue        = "HUMANSH_E2E_FILE_SECRET_DO_NOT_SEND"
@@ -96,6 +97,54 @@ eventually_dump '' || exit 141
 		if strings.Contains(output, "Not sure whether this is English or a command") {
 			t.Fatalf("documented Go help command was left ambiguous:\n%s", output)
 		}
+		fixture.requireProviderEvents(t, "", nil)
+	})
+
+	t.Run("reported env invocation classifies as a command", func(t *testing.T) {
+		installedBinary := filepath.Join(fixture.home, ".local", "bin", "humansh")
+		command := exec.Command(installedBinary, "classify", "--json", "--shell", "zsh", "--first-token-kind", "command", "--resolved-command-path", "/usr/bin/env")
+		command.Env = fixture.env
+		command.Stdin = strings.NewReader(reportedEnvCommand)
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("classify reported env command: %v\n%s", err, output)
+		}
+		var result struct {
+			Outcome      string `json:"outcome"`
+			DecisionCode string `json:"decision_code"`
+		}
+		if err := json.Unmarshal(output, &result); err != nil {
+			t.Fatalf("decode classification: %v\n%s", err, output)
+		}
+		if result.Outcome != "literal" {
+			t.Fatalf("reported env command was left %s (%s):\n%s", result.Outcome, result.DecisionCode, output)
+		}
+	})
+
+	t.Run("env forwards debugger arguments through installed Zsh", func(t *testing.T) {
+		goPath := filepath.Join(fixture.root, "go")
+		dlvPath := filepath.Join(goPath, "bin", "dlv")
+		input := "/usr/bin/env GOPATH=" + goPath + " PYXIS_AGENT_BACKEND=cursor " + dlvPath + " dap --log=true --log-output=debugger --client-addr=:59908"
+		output := fixture.runZshScenario(t, `
+zpty -w -n H "$HUMANSH_E2E_COMMAND"$'\r'
+wait_for 'HUMANSH_E2E_DLV_EXECUTED' 'Not sure whether this is English or a command' || exit 156
+eventually_dump '' || exit 157
+`, "HUMANSH_E2E_COMMAND", input)
+		if strings.Contains(output, "HUMANSH_E2E_UNEXPECTED_EXECUTION") {
+			t.Fatalf("env changed the debugger invocation:\n%s", output)
+		}
+		fixture.requireProviderEvents(t, "", nil)
+	})
+
+	t.Run("env still detects English after the forwarded utility", func(t *testing.T) {
+		goPath := filepath.Join(fixture.root, "go")
+		dlvPath := filepath.Join(goPath, "bin", "dlv")
+		input := "/usr/bin/env GOPATH=" + goPath + " PYXIS_AGENT_BACKEND=cursor " + dlvPath + " is failing please authenticate"
+		fixture.runZshScenario(t, `
+zpty -w -n H "$HUMANSH_E2E_COMMAND"$'\r'
+wait_for 'Not sure whether this is English or a command' 'HUMANSH_E2E_UNEXPECTED_EXECUTION' || exit 158
+dump_buffer "$HUMANSH_E2E_COMMAND" || exit 159
+`, "HUMANSH_E2E_COMMAND", input)
 		fixture.requireProviderEvents(t, "", nil)
 	})
 
@@ -387,6 +436,15 @@ func installZshFixture(t *testing.T) *installedFixture {
 	buildFixture.Dir = repo
 	if output, err := buildFixture.CombinedOutput(); err != nil {
 		t.Fatalf("build deterministic Zellij fixture: %v\n%s", err, output)
+	}
+	fakeDlv := filepath.Join(testRoot, "go", "bin", "dlv")
+	if err := os.MkdirAll(filepath.Dir(fakeDlv), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	buildFixture = exec.Command("go", "build", "-trimpath", "-o", fakeDlv, "./tests/e2e/testdata/fakedlv")
+	buildFixture.Dir = repo
+	if output, err := buildFixture.CombinedOutput(); err != nil {
+		t.Fatalf("build deterministic debugger fixture: %v\n%s", err, output)
 	}
 	fakeDocker := filepath.Join(providerBin, "docker")
 	buildFixture = exec.Command("go", "build", "-trimpath", "-o", fakeDocker, "./tests/e2e/testdata/fakedocker")
