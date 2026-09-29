@@ -35,6 +35,7 @@ const (
 	goCoverCommand          = "go test -cover"
 	goHelpTestCommand       = "go help test"
 	reportedEnvCommand      = "/usr/bin/env GOPATH=/Users/example/go PYXIS_AGENT_BACKEND=cursor /Users/example/go/bin/dlv dap --log=true --log-output=debugger --client-addr=:59908"
+	singleEnvCommand        = "  /usr/bin/env GOPATH=/Users/example/go /Users/example/go/bin/dlv dap --log=true --log-output=debugger --client-addr=:55726"
 	dockerRunCommand        = "docker run --rm --network host docker.io/library/node@sha256:6dac556d980b7f0e5498d08f08cee0ca67798b4ad6c23964a9214920e67758d0 curl --silent --show-error --fail --max-time 8 http://127.0.0.1:3000/api/v1/version"
 	privateEnvironmentValue = "HUMANSH_E2E_ENV_SECRET_DO_NOT_SEND"
 	privateFileValue        = "HUMANSH_E2E_FILE_SECRET_DO_NOT_SEND"
@@ -101,23 +102,32 @@ eventually_dump '' || exit 141
 	})
 
 	t.Run("reported env invocation classifies as a command", func(t *testing.T) {
-		installedBinary := filepath.Join(fixture.home, ".local", "bin", "humansh")
-		command := exec.Command(installedBinary, "classify", "--json", "--shell", "zsh", "--first-token-kind", "command", "--resolved-command-path", "/usr/bin/env")
-		command.Env = fixture.env
-		command.Stdin = strings.NewReader(reportedEnvCommand)
-		output, err := command.CombinedOutput()
-		if err != nil {
-			t.Fatalf("classify reported env command: %v\n%s", err, output)
-		}
-		var result struct {
-			Outcome      string `json:"outcome"`
-			DecisionCode string `json:"decision_code"`
-		}
-		if err := json.Unmarshal(output, &result); err != nil {
-			t.Fatalf("decode classification: %v\n%s", err, output)
-		}
-		if result.Outcome != "literal" {
-			t.Fatalf("reported env command was left %s (%s):\n%s", result.Outcome, result.DecisionCode, output)
+		for _, test := range []struct {
+			name, input string
+		}{
+			{"multiple assignments", reportedEnvCommand},
+			{"single assignment with leading whitespace", singleEnvCommand},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				installedBinary := filepath.Join(fixture.home, ".local", "bin", "humansh")
+				command := exec.Command(installedBinary, "classify", "--json", "--shell", "zsh", "--first-token-kind", "command", "--resolved-command-path", "/usr/bin/env")
+				command.Env = fixture.env
+				command.Stdin = strings.NewReader(test.input)
+				output, err := command.CombinedOutput()
+				if err != nil {
+					t.Fatalf("classify reported env command: %v\n%s", err, output)
+				}
+				var result struct {
+					Outcome      string `json:"outcome"`
+					DecisionCode string `json:"decision_code"`
+				}
+				if err := json.Unmarshal(output, &result); err != nil {
+					t.Fatalf("decode classification: %v\n%s", err, output)
+				}
+				if result.Outcome != "literal" {
+					t.Fatalf("reported env command was left %s (%s):\n%s", result.Outcome, result.DecisionCode, output)
+				}
+			})
 		}
 	})
 
@@ -132,6 +142,20 @@ eventually_dump '' || exit 157
 `, "HUMANSH_E2E_COMMAND", input)
 		if strings.Contains(output, "HUMANSH_E2E_UNEXPECTED_EXECUTION") {
 			t.Fatalf("env changed the debugger invocation:\n%s", output)
+		}
+		fixture.requireProviderEvents(t, "", nil)
+	})
+
+	t.Run("reported single-assignment env command executes through installed Zsh", func(t *testing.T) {
+		goPath := filepath.Join(fixture.root, "go")
+		input := strings.ReplaceAll(singleEnvCommand, "/Users/example/go", goPath)
+		output := fixture.runZshScenario(t, `
+zpty -w -n H "$HUMANSH_E2E_COMMAND"$'\r'
+wait_for 'HUMANSH_E2E_DLV_EXECUTED' 'Not sure whether this is English or a command' || exit 160
+eventually_dump '' || exit 161
+`, "HUMANSH_E2E_COMMAND", input, "PYXIS_AGENT_BACKEND", "")
+		if strings.Contains(output, "HUMANSH_E2E_UNEXPECTED_EXECUTION") {
+			t.Fatalf("env changed the single-assignment debugger invocation:\n%s", output)
 		}
 		fixture.requireProviderEvents(t, "", nil)
 	})
